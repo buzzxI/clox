@@ -14,5 +14,6 @@ typedef struct {
 
 void init_chunk(Chunk *chunk);
 void write_chunk(Chunk *chunk, uint8_t byte);
+void free_chunk(Chunk *chunk);
 
 #endif  // clox_chunk_h
