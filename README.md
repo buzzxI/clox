@@ -1,4 +1,4 @@
-lox interpreter implementation with c
+lox interpreter implementation in c
 
 ```shell
 # build the project
