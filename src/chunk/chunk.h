@@ -13,10 +13,11 @@ typedef struct {
     int capacity;       // size of memory allocated
     int count;          // size of memory used
     ValueArray constant;// constant pool in bytecode 
+    int *line_info;     // line info of bytecode
 } Chunk;
 
 void init_chunk(Chunk *chunk);
-void write_chunk(Chunk *chunk, uint8_t byte);
+void write_chunk(Chunk *chunk, uint8_t byte, int line);
 void free_chunk(Chunk *chunk);
 
 // append a constant into chunk, returns its index of constant pool

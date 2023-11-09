@@ -43,6 +43,9 @@ $(TARGET_EXEC): $(MAIN_OBJ)
 
 ${DEBUG_TARGET}: ${DEBUG_OBJ}
 	$(CC) $(DEBUG_OBJ) -o $@ $(LDFLAGS)
+	@echo "Running debug build..."
+	./${DEBUG_TARGET}
+	@echo "Done."
 
 
 # # The final build step.
