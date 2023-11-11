@@ -1,20 +1,8 @@
+#include "disassemble.h"
 #include <stdio.h>
-#include "debug.h"
 
 static int non_operand(const char *name, int offset);
 static int single_operand(const char *name, Chunk *chunk, int offset);
-
-int main(int argc, const char* argv[]) {
-    Chunk chunk;
-    init_chunk(&chunk);
-    write_chunk(&chunk, OP_CONSTANT, 123);
-    int idx = append_constant(&chunk, 0.000012345);
-    write_chunk(&chunk, idx, 123); 
-    write_chunk(&chunk, OP_RETURN, 123);
-    disassemble_chunk(&chunk, "test chunk");
-    free_chunk(&chunk);
-    return 0;
-}
 
 void disassemble_chunk(Chunk* chunk, const char* name) {
     printf("== DEBUG: %s ==\n", name);
@@ -32,9 +20,18 @@ int disassemble_instruction(Chunk *chunk, int offset) {
     switch (instruction) {
         case OP_RETURN: 
             return non_operand("OP_RETURN", offset);
-            break;
         case OP_CONSTANT:
             return single_operand("OP_CONSTANT", chunk, offset);
+        case OP_NEGATE:
+            return non_operand("OP_NEGATE", offset);
+        case OP_ADD:
+            return non_operand("OP_ADD", offset);
+        case OP_SUBTRACT:
+            return non_operand("OP_SUBTRACT", offset);
+        case OP_MULTIPLY:
+            return non_operand("OP_MULTIPLY", offset);
+        case OP_DIVIDE:
+            return non_operand("OP_DIVIDE", offset);
         default:
             break;
     }
