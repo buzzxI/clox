@@ -1,5 +1,6 @@
 #include "vm.h"
 #include "disassemble/disassemble.h"
+#include "complier/compiler.h"
 #include "common.h"
 // added for print constants
 #include <stdio.h>
@@ -15,16 +16,49 @@ void free_vm(VM *vm) {
 
 }
 
-InterpreterResult interpret(VM *vm, Chunk *chunk) {
-    vm->chunk = chunk;
-    vm->pc = vm->chunk->code;
-#ifdef  CLOX_DEBUG_DISASSEMBLE 
-        disassemble_chunk(chunk, "clox dump");
-        return INTERPRET_DEBUG;
-#else
-    return run(vm);
-#endif  // CLOX_DEBUG_DISASSEMBLE
+InterpreterResult interpret(const char *source) {
+    VM vm;
+    init_vm(&vm);
+    compile(source);
+
+    // Chunk chunk;
+    // init_chunk(&chunk);
+    // // append 1.2
+    // write_chunk(&chunk, OP_CONSTANT, 123);
+    // int idx = append_constant(&chunk, 1.2);
+    // write_chunk(&chunk, idx, 123);
+    // // append 3.4
+    // write_chunk(&chunk, OP_CONSTANT, 123);
+    // idx = append_constant(&chunk, 3.4);
+    // write_chunk(&chunk, idx, 123);
+    // // append OP_ADD
+    // write_chunk(&chunk, OP_ADD, 123);
+    // // append 5.6
+    // write_chunk(&chunk, OP_CONSTANT, 123);
+    // idx = append_constant(&chunk, 5.6);
+    // write_chunk(&chunk, idx, 123);
+    // // append OP_DIVIDE
+    // write_chunk(&chunk, OP_DIVIDE, 123);
+    // // append OP_NEGATE
+    // write_chunk(&chunk, OP_NEGATE, 123);
+    // // append OP_RETUNR
+    // write_chunk(&chunk, OP_RETURN, 123); 
+    // InterpreterResult rst = interpret(&vm, &chunk);
+    // printf("running rst: %d\n", rst);
+    // free_chunk(&chunk);
+    free_vm(&vm);
 }
+
+// InterpreterResult interpret(VM *vm, Chunk *chunk) {
+//     vm->chunk = chunk;
+//     vm->pc = vm->chunk->code;
+// #ifdef  CLOX_DEBUG_DISASSEMBLE 
+//         disassemble_chunk(chunk, "clox dump");
+//         return INTERPRET_DEBUG;
+// #else
+//     return run(vm);
+// #endif  // CLOX_DEBUG_DISASSEMBLE
+// }
 
 void push(VM *vm, Value value) {
     *vm->sp = value;
