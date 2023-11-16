@@ -4,13 +4,15 @@
 #include "value/value.h"
 
 typedef enum {
-    OP_RETURN,
-    OP_CONSTANT,
-    OP_NEGATE,
-    OP_ADD,
-    OP_SUBTRACT,
-    OP_MULTIPLY,
-    OP_DIVIDE,
+    CLOX_OP_RETURN,
+    CLOX_OP_CONSTANT,
+    // constant with 2 bytes
+    CLOX_OP_CONSTANT_16,
+    CLOX_OP_NEGATE,
+    CLOX_OP_ADD,
+    CLOX_OP_SUBTRACT,
+    CLOX_OP_MULTIPLY,
+    CLOX_OP_DIVIDE,
 } OpCode;
 
 typedef struct {

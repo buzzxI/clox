@@ -29,19 +29,31 @@ INC_FLAGS := $(addprefix -I,$(INC_DIRS))
 
 # The -MMD and -MP flags together generate Makefiles for us!
 # These files will have .d instead of .o as the output.
-CPPFLAGS := $(INC_FLAGS) -MMD -MP -g
-
+CPPFLAGS := $(INC_FLAGS) -MMD -MP 
 PPFLAGS := -E
+GDBFLAGS := -g
+
+LOXPATH := lox/test.lox
 
 # build clox
 $(TARGET_EXEC): $(OBJS)
 	$(CC) $(OBJS) -o $@ $(LDFLAGS)
 
+.PHONY: debug
+debug: ${OBJS}
+	${CC} ${OBJS} -o ${TARGET_EXEC} ${LDFLAGS} ${GDBFLAGS}
+
 # run clox
-.PHONY: run
-run: $(TARGET_EXEC)
+.PHONY: REPL
+REPL: $(TARGET_EXEC)
 	@echo "Running build..."
 	./${TARGET_EXEC}
+	@echo "Done."
+
+.PHONY: script
+script: ${TARGET_EXEC}
+	@echo "Running build..."
+	./${TARGET_EXEC} ${LOXPATH}
 	@echo "Done."
 
 # preprocess clox

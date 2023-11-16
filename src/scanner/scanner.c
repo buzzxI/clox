@@ -57,11 +57,11 @@ void free_scanner(Scanner *scanner) {
 
 Token* scan_token(Scanner *scanner) {
     skip_whitespace(scanner);
-    int is_comment = 0;
-    do {
-        is_comment = skip_comment(scanner);
-        if (is_comment < 0) return error_token("unterminated comment", scanner);  
-    } while (is_comment);
+    while (1) {
+        int is_comment = skip_comment(scanner);
+        if (is_comment < 0) return error_token("unterminated comment", scanner);
+        if (is_comment == 0) break;
+    }
     
     scanner->start = scanner->current;
     scanner->column = scanner->cur_column;
@@ -214,38 +214,47 @@ static void skip_whitespace(Scanner *scanner) {
 
 static int skip_comment(Scanner *scanner) {
     char c = peek(0, scanner);
-    if (match('/', scanner)) {
-        if (match('/', scanner)) {
-            // a comment goes until the end of the line
-            while (!is_end(scanner) && peek(0, scanner) != '\n') advance(scanner);
-            if (!is_end(scanner)) {
-                // consume '\n'
+    if (c == '/') {
+        switch (peek(1, scanner)) {
+            case '/': {
                 advance(scanner);
-                scanner->line++;
-                scanner->cur_column = 0;
+                advance(scanner);
+                // a comment goes until the end of the line
+                while (!is_end(scanner) && peek(0, scanner) != '\n') advance(scanner);
+                if (!is_end(scanner)) {
+                    // consume '\n'
+                    advance(scanner);
+                    scanner->line++;
+                    scanner->cur_column = 0;
+                }
+                return 1;
             }
-        } else if (match('*', scanner)) {
-            int flag = 0;
-            for (char next = peek(0, scanner), next_next = peek(1, scanner); 
-                next != '\0' && next_next != '\0';
-                advance(scanner), next = peek(0, scanner), next_next = peek(1, scanner)) {
-                    if (next == '*' && next_next == '/') {
-                        flag = 1;
-                        break;
-                    }
-                    if (next == '\n') {
-                        scanner->line++;
-                        scanner->cur_column = 0;
-                    }
-            } 
-            if (flag) {
-                // flip to next => '*'
+            case '*': {
                 advance(scanner);
-                // flip to next_next => '/'
                 advance(scanner);
-            } else return -1;
-        } else return 0;
-        return 1;
+                int flag = 0;
+                for (char next = peek(0, scanner), next_next = peek(1, scanner); 
+                    next != '\0' && next_next != '\0';
+                    advance(scanner), next = peek(0, scanner), next_next = peek(1, scanner)) {
+                        if (next == '*' && next_next == '/') {
+                            flag = 1;
+                            break;
+                        }
+                        if (next == '\n') {
+                            scanner->line++;
+                            scanner->cur_column = 0;
+                        }
+                } 
+                if (flag) {
+                    // flip to next => '*'
+                    advance(scanner);
+                    // flip to next_next => '/'
+                    advance(scanner);
+                    return 1;
+                } else return -1;
+            }
+            default: break;
+        }
     }
     return 0;
 }

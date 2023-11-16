@@ -19,46 +19,44 @@ void free_vm(VM *vm) {
 InterpreterResult interpret(const char *source) {
     VM vm;
     init_vm(&vm);
-    compile(source);
-
-    // Chunk chunk;
-    // init_chunk(&chunk);
+    Chunk chunk;
+    init_chunk(&chunk);
+    if (!compile(source, &chunk)) {
+        free_chunk(&chunk);
+        return INTERPRET_COMPLIE_ERROR;
+    }
+    vm.chunk = &chunk;
+    vm.pc = chunk.code;
+    InterpreterResult rst;
+#ifdef  CLOX_DEBUG_DISASSEMBLE 
+    disassemble_chunk(&chunk, "clox dump");
+    rst = INTERPRET_DEBUG;
+#else
+    rst = run(&vm);
+#endif  // CLOX_DEBUG_DISASSEMBLE
+    free_chunk(&chunk);
+    return rst; 
     // // append 1.2
-    // write_chunk(&chunk, OP_CONSTANT, 123);
+    // write_chunk(&chunk, CLOX_OP_CONSTANT, 123);
     // int idx = append_constant(&chunk, 1.2);
     // write_chunk(&chunk, idx, 123);
     // // append 3.4
-    // write_chunk(&chunk, OP_CONSTANT, 123);
+    // write_chunk(&chunk, CLOX_OP_CONSTANT, 123);
     // idx = append_constant(&chunk, 3.4);
     // write_chunk(&chunk, idx, 123);
-    // // append OP_ADD
-    // write_chunk(&chunk, OP_ADD, 123);
+    // // append CLOX_OP_ADD
+    // write_chunk(&chunk, CLOX_OP_ADD, 123);
     // // append 5.6
-    // write_chunk(&chunk, OP_CONSTANT, 123);
+    // write_chunk(&chunk, CLOX_OP_CONSTANT, 123);
     // idx = append_constant(&chunk, 5.6);
     // write_chunk(&chunk, idx, 123);
-    // // append OP_DIVIDE
-    // write_chunk(&chunk, OP_DIVIDE, 123);
-    // // append OP_NEGATE
-    // write_chunk(&chunk, OP_NEGATE, 123);
-    // // append OP_RETUNR
-    // write_chunk(&chunk, OP_RETURN, 123); 
-    // InterpreterResult rst = interpret(&vm, &chunk);
-    // printf("running rst: %d\n", rst);
-    // free_chunk(&chunk);
-    free_vm(&vm);
+    // // append CLOX_OP_DIVIDE
+    // write_chunk(&chunk, CLOX_OP_DIVIDE, 123);
+    // // append CLOX_OP_NEGATE
+    // write_chunk(&chunk, CLOX_OP_NEGATE, 123);
+    // // append CLOX_OP_RETUNR
+    // write_chunk(&chunk, CLOX_OP_RETURN, 123); 
 }
-
-// InterpreterResult interpret(VM *vm, Chunk *chunk) {
-//     vm->chunk = chunk;
-//     vm->pc = vm->chunk->code;
-// #ifdef  CLOX_DEBUG_DISASSEMBLE 
-//         disassemble_chunk(chunk, "clox dump");
-//         return INTERPRET_DEBUG;
-// #else
-//     return run(vm);
-// #endif  // CLOX_DEBUG_DISASSEMBLE
-// }
 
 void push(VM *vm, Value value) {
     *vm->sp = value;
@@ -77,6 +75,7 @@ static void reset_stack(VM *vm) {
 static InterpreterResult run(VM *vm) {
 #define READ_BYTE() (*vm->pc++)
 #define READ_CONSTANT() (vm->chunk->constant.values[READ_BYTE()])
+#define READ_CONSTANT_16() (vm->chunk->constant.values[(READ_BYTE() << 8) | (READ_BYTE())])
 #define BINARY_OP(op) do {\
         Value b = pop(vm);\
         Value a = pop(vm);\
@@ -91,32 +90,36 @@ static InterpreterResult run(VM *vm) {
 #endif
         uint8_t instruction = READ_BYTE();
         switch (instruction) {
-            case OP_RETURN:
+            case CLOX_OP_RETURN:
                 printf("%g\n", pop(vm));
                 return INTERPRET_OK;
-            case OP_CONSTANT:
+            case CLOX_OP_CONSTANT:
                 push(vm, READ_CONSTANT());
                 break;
-            case OP_NEGATE:
+            case CLOX_OP_CONSTANT_16:
+                push(vm, READ_CONSTANT_16());
+                break;
+            case CLOX_OP_NEGATE:
                 push(vm, -pop(vm));
                 break; 
-            case OP_ADD:
+            case CLOX_OP_ADD:
                 BINARY_OP(+);
                 break;
-            case OP_SUBTRACT:
+            case CLOX_OP_SUBTRACT:
                 BINARY_OP(-);
                 break;
-            case OP_MULTIPLY:
+            case CLOX_OP_MULTIPLY:
                 BINARY_OP(*);
                 break;
-            case OP_DIVIDE:
+            case CLOX_OP_DIVIDE:
                 BINARY_OP(/);
                 break;
             default:
                 break;
         }
     }
-#undef READ_CONSTANT
 #undef READ_BYTE
+#undef READ_CONSTANT
+#undef READ_CONSTANT_16
 #undef BINARY_OP
 }

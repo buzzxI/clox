@@ -12,7 +12,7 @@ typedef enum {
 
     /**
      * single or double characters token
-     * '!', '!=', '=', '==', '>', '>=', '<', '<='
+     * '!', '!=', '=', '==', '>'u '>=', '<', '<='
      */
     CLOX_TOKEN_BANG, CLOX_TOKEN_BANG_EQUAL, CLOX_TOKEN_EQUAL, CLOX_TOKEN_EQUAL_EQUAL,
     CLOX_TOKEN_GREATER, CLOX_TOKEN_GREATER_EQUAL, CLOX_TOKEN_LESS, CLOX_TOKEN_LESS_EQUAL,
