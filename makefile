@@ -31,17 +31,31 @@ INC_FLAGS := $(addprefix -I,$(INC_DIRS))
 # These files will have .d instead of .o as the output.
 CPPFLAGS := $(INC_FLAGS) -MMD -MP 
 PPFLAGS := -E
-GDBFLAGS := -g
+CFLAGS := -Wall -Wextra
+
+# Optional debug flag (-g)
+DEBUG ?= 0
+ifeq ($(DEBUG), 1)
+    CFLAGS += -g
+endif
+
+# disassemble lox script flag
+DISASSEMBLE ?= 0
+ifeq ($(DISASSEMBLE), 1)
+	CPPFLAGS += -DCLOX_DEBUG_DISASSEMBLE
+endif
+
+# trace lox instruction flag
+TRACE ?= 0
+ifeq ($(TRACE), 1)
+	CPPFLAGS += -DCLOX_DEBUG_TRACE_EXECUTION
+endif
 
 LOXPATH := lox/test.lox
 
 # build clox
 $(TARGET_EXEC): $(OBJS)
-	$(CC) $(OBJS) -o $@ $(LDFLAGS)
-
-.PHONY: debug
-debug: ${OBJS}
-	${CC} ${OBJS} -o ${TARGET_EXEC} ${LDFLAGS} ${GDBFLAGS}
+	$(CC) $(OBJS) -o $@ $(LDFLAGS) ${CFLAGS}
 
 # run clox
 .PHONY: REPL
@@ -63,7 +77,7 @@ preprocess: ${EXTENDS}
 # Target to generate object files
 $(BUILD_DIR)/%.c.o: %.c
 	mkdir -p $(dir $@)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@ ${GDBFLAGS}
 
 # Target to generate preprocessed source file
 $(BUILD_DIR)/%.c.i: %.c

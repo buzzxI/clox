@@ -8,11 +8,18 @@ typedef enum {
     CLOX_OP_CONSTANT,
     // constant with 2 bytes
     CLOX_OP_CONSTANT_16,
+    CLOX_OP_TRUE,
+    CLOX_OP_FALSE,
+    CLOX_OP_NIL,
     CLOX_OP_NEGATE,
     CLOX_OP_ADD,
     CLOX_OP_SUBTRACT,
     CLOX_OP_MULTIPLY,
     CLOX_OP_DIVIDE,
+    CLOX_OP_NOT,
+    CLOX_OP_EQUAL,
+    CLOX_OP_GREATER,
+    CLOX_OP_LESS,
 } OpCode;
 
 typedef struct {
@@ -21,10 +28,11 @@ typedef struct {
     int count;          // size of memory used
     ValueArray constant;// constant pool in bytecode 
     int *line_info;     // line info of bytecode
+    int *column_info;   // column info of bytecode
 } Chunk;
 
 void init_chunk(Chunk *chunk);
-void write_chunk(Chunk *chunk, uint8_t byte, int line);
+void write_chunk(Chunk *chunk, uint8_t byte, int line, int column);
 void free_chunk(Chunk *chunk);
 
 // append a constant into chunk, returns its index of constant pool

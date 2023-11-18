@@ -9,15 +9,17 @@ void init_chunk(Chunk *chunk) {
     chunk->line_info = NULL;
 }
 
-void write_chunk(Chunk *chunk, uint8_t byte, int line) {
+void write_chunk(Chunk *chunk, uint8_t byte, int line, int column) {
     if (chunk->count + 1 > chunk->capacity) {
         int new_capacity = GROW_CAPACITY(chunk->capacity);
         chunk->code = GROW_ARRAY(uint8_t, chunk->code, chunk->capacity, new_capacity);
         chunk->capacity = new_capacity;
         chunk->line_info = GROW_ARRAY(int, chunk->line_info, chunk->capacity, new_capacity);
+        chunk->column_info = GROW_ARRAY(int, chunk->column_info, chunk->capacity, new_capacity);
     }
     chunk->code[chunk->count] = byte;
     chunk->line_info[chunk->count] = line;
+    chunk->column_info[chunk->count] = column;
     chunk->count++;
 }
 

@@ -1,5 +1,6 @@
 #include "compiler.h"
 #include "scanner/scanner.h"
+#include "value/value.h"
 // added for free token
 #include <stdlib.h>
 // added for print token
@@ -7,6 +8,7 @@
 #include <stdarg.h>
 
 static void init_parser(Scanner *scanner, Chunk *chunk, Parser *parser);
+static void free_parser(Parser *parser); 
 static void advance(Parser *parser);
 static void consume(TokenType type, const char *message, Parser *parser);
 static void parse_precedence(Precedence precedence, Parser *parser);
@@ -15,6 +17,7 @@ static void grouping(Parser *parser);
 static void number(Parser *parser);
 static void unary(Parser *parser);
 static void binary(Parser *parser);
+static void literal(Parser *parser);
 static void emit_byte(uint8_t byte, Parser *parser);
 static void emit_bytes(Parser *parser, int cnt, ...);
 static void emit_return(Parser *parser);
@@ -22,63 +25,68 @@ static void emit_constant(Value value, Parser *parser);
 static void error_report(Token *token, const char *message, Parser *parser);
 
 ParserRule rules[] = {
-    [CLOX_TOKEN_ERROR]         = { NULL,    NULL,    PREC_NONE },
+    [CLOX_TOKEN_ERROR]         = { NULL,     NULL,    PREC_NONE },
     [CLOX_TOKEN_LEFT_PAREN]    = { grouping, NULL,    PREC_NONE },
-    [CLOX_TOKEN_RIGHT_PAREN]   = { NULL,    NULL,    PREC_NONE },
-    [CLOX_TOKEN_LEFT_BRACE]    = { NULL,    NULL,    PREC_NONE },
-    [CLOX_TOKEN_RIGHT_BRACE]   = { NULL,    NULL,    PREC_NONE },
-    [CLOX_TOKEN_COMMA]         = { NULL,    NULL,    PREC_NONE },
-    [CLOX_TOKEN_DOT]           = { NULL,    NULL,    PREC_NONE },
-    [CLOX_TOKEN_MINUS]         = { unary,   binary,  PREC_TERM },
-    [CLOX_TOKEN_PLUS]          = { NULL,    binary,  PREC_TERM },
-    [CLOX_TOKEN_SEMICOLON]     = { NULL,    NULL,    PREC_NONE },
-    [CLOX_TOKEN_SLASH]         = { NULL,    binary,  PREC_FACTOR },
-    [CLOX_TOKEN_STAR]          = { NULL,    binary,  PREC_FACTOR },
-    [CLOX_TOKEN_BANG]          = { unary,   NULL,    PREC_UNARY },
-    [CLOX_TOKEN_BANG_EQUAL]    = { NULL,    binary,  PREC_EQUALITY },
-    [CLOX_TOKEN_EQUAL]         = { NULL,    NULL,    PREC_ASSIGNMENT },
-    [CLOX_TOKEN_EQUAL_EQUAL]   = { NULL,    binary,  PREC_EQUALITY },
-    [CLOX_TOKEN_GREATER]       = { NULL,    binary,  PREC_COMPARISON },
-    [CLOX_TOKEN_GREATER_EQUAL] = { NULL,    binary,  PREC_COMPARISON },
-    [CLOX_TOKEN_LESS]          = { NULL,    binary,  PREC_COMPARISON },
-    [CLOX_TOKEN_LESS_EQUAL]    = { NULL,    binary,  PREC_COMPARISON },
-    [CLOX_TOKEN_IDENTIFIER]    = { NULL,    NULL,    PREC_PRIMARY },
-    [CLOX_TOKEN_STRING]        = { NULL,    NULL,    PREC_PRIMARY },
-    [CLOX_TOKEN_NUMBER]        = { number,  NULL,    PREC_PRIMARY },
-    [CLOX_TOKEN_AND]           = { NULL,    binary,  PREC_AND },
-    [CLOX_TOKEN_CLASS]         = { NULL,    NULL,    PREC_NONE },
-    [CLOX_TOKEN_ELSE]          = { NULL,    NULL,    PREC_NONE },
-    [CLOX_TOKEN_FALSE]         = { NULL,    NULL,    PREC_PRIMARY },
-    [CLOX_TOKEN_FUN]           = { NULL,    NULL,    PREC_NONE },
-    [CLOX_TOKEN_FOR]           = { NULL,    NULL,    PREC_NONE },
-    [CLOX_TOKEN_IF]            = { NULL,    NULL,    PREC_NONE },
-    [CLOX_TOKEN_NIL]           = { NULL,    NULL,    PREC_NONE },
-    [CLOX_TOKEN_OR]            = { NULL,    binary,  PREC_OR },
-    [CLOX_TOKEN_PRINT]         = { NULL,    NULL,    PREC_NONE },
-    [CLOX_TOKEN_RETURN]        = { NULL,    NULL,    PREC_NONE },
-    [CLOX_TOKEN_SUPER]         = { NULL,    NULL,    PREC_NONE },
-    [CLOX_TOKEN_THIS]          = { NULL,    NULL,    PREC_NONE },
-    [CLOX_TOKEN_TRUE]          = { NULL,    NULL,    PREC_PRIMARY },
-    [CLOX_TOKEN_VAR]           = { NULL,    NULL,    PREC_NONE },
-    [CLOX_TOKEN_WHILE]         = { NULL,    NULL,    PREC_NONE },
-    [CLOX_TOKEN_EOF]           = { NULL,    NULL,    PREC_NONE },
+    [CLOX_TOKEN_RIGHT_PAREN]   = { NULL,     NULL,    PREC_NONE },
+    [CLOX_TOKEN_LEFT_BRACE]    = { NULL,     NULL,    PREC_NONE },
+    [CLOX_TOKEN_RIGHT_BRACE]   = { NULL,     NULL,    PREC_NONE },
+    [CLOX_TOKEN_COMMA]         = { NULL,     NULL,    PREC_NONE },
+    [CLOX_TOKEN_DOT]           = { NULL,     NULL,    PREC_NONE },
+    [CLOX_TOKEN_MINUS]         = { unary,    binary,  PREC_TERM },
+    [CLOX_TOKEN_PLUS]          = { NULL,     binary,  PREC_TERM },
+    [CLOX_TOKEN_SEMICOLON]     = { NULL,     NULL,    PREC_NONE },
+    [CLOX_TOKEN_SLASH]         = { NULL,     binary,  PREC_FACTOR },
+    [CLOX_TOKEN_STAR]          = { NULL,     binary,  PREC_FACTOR },
+    [CLOX_TOKEN_BANG]          = { unary,    NULL,    PREC_UNARY },
+    [CLOX_TOKEN_BANG_EQUAL]    = { NULL,     binary,  PREC_EQUALITY },
+    [CLOX_TOKEN_EQUAL]         = { NULL,     NULL,    PREC_ASSIGNMENT },
+    [CLOX_TOKEN_EQUAL_EQUAL]   = { NULL,     binary,  PREC_EQUALITY },
+    [CLOX_TOKEN_GREATER]       = { NULL,     binary,  PREC_COMPARISON },
+    [CLOX_TOKEN_GREATER_EQUAL] = { NULL,     binary,  PREC_COMPARISON },
+    [CLOX_TOKEN_LESS]          = { NULL,     binary,  PREC_COMPARISON },
+    [CLOX_TOKEN_LESS_EQUAL]    = { NULL,     binary,  PREC_COMPARISON },
+    [CLOX_TOKEN_IDENTIFIER]    = { NULL,     NULL,    PREC_PRIMARY },
+    [CLOX_TOKEN_STRING]        = { NULL,     NULL,    PREC_PRIMARY },
+    [CLOX_TOKEN_NUMBER]        = { number,   NULL,    PREC_PRIMARY },
+    [CLOX_TOKEN_AND]           = { NULL,     binary,  PREC_AND },
+    [CLOX_TOKEN_CLASS]         = { NULL,     NULL,    PREC_NONE },
+    [CLOX_TOKEN_ELSE]          = { NULL,     NULL,    PREC_NONE },
+    [CLOX_TOKEN_FALSE]         = { literal,  NULL,    PREC_PRIMARY },
+    [CLOX_TOKEN_FUN]           = { NULL,     NULL,    PREC_NONE },
+    [CLOX_TOKEN_FOR]           = { NULL,     NULL,    PREC_NONE },
+    [CLOX_TOKEN_IF]            = { NULL,     NULL,    PREC_NONE },
+    [CLOX_TOKEN_NIL]           = { literal,  NULL,    PREC_PRIMARY },
+    [CLOX_TOKEN_OR]            = { NULL,     binary,  PREC_OR },
+    [CLOX_TOKEN_PRINT]         = { NULL,     NULL,    PREC_NONE },
+    [CLOX_TOKEN_RETURN]        = { NULL,     NULL,    PREC_NONE },
+    [CLOX_TOKEN_SUPER]         = { NULL,     NULL,    PREC_NONE },
+    [CLOX_TOKEN_THIS]          = { NULL,     NULL,    PREC_NONE },
+    [CLOX_TOKEN_TRUE]          = { literal,  NULL,    PREC_PRIMARY },
+    [CLOX_TOKEN_VAR]           = { NULL,     NULL,    PREC_NONE },
+    [CLOX_TOKEN_WHILE]         = { NULL,     NULL,    PREC_NONE },
+    [CLOX_TOKEN_EOF]           = { NULL,     NULL,    PREC_NONE },
+    [CLOX_TOKEN_STAR_STAR]     = { NULL,     NULL,    PREC_NONE },
+    [CLOX_TOKEN_PERCENT]       = { NULL,     NULL,    PREC_NONE },
+    [CLOX_TOKEN_PLUS_PLUS]     = { NULL,     NULL,    PREC_NONE },
+    [CLOX_TOKEN_MINUS_MINUS]   = { NULL,     NULL,    PREC_NONE },
+    [CLOX_TOKEN_PLUS_EQUAL]    = { NULL,     NULL,    PREC_NONE },
+    [CLOX_TOKEN_MINUS_EQUAL]   = { NULL,     NULL,    PREC_NONE },
+    [CLOX_TOKEN_STAR_EQUAL]    = { NULL,     NULL,    PREC_NONE },
+    [CLOX_TOKEN_SLASH_EQUAL]   = { NULL,     NULL,    PREC_NONE },
+    [CLOX_TOKEN_PERCENT_EQUAL] = { NULL,     NULL,    PREC_NONE },
 };
 
 bool compile(const char *source, Chunk *chunk) {
     Parser parser;
-
     Scanner scanner;
     init_scanner(source, &scanner);
     init_parser(&scanner, chunk, &parser);
-    int num = 0;
-    // while (1) {
-    //     advance(&parser);
-    //     fprintf(stdout, "%d\n", parser.current->type);
-    //     num++;
-    // }
     advance(&parser);
     expression(&parser);
+    // just for represent expression result
+    emit_return(&parser);
     free_scanner(&scanner);
+    free_parser(&parser);
     return !parser.had_error;
 }
 
@@ -92,12 +100,18 @@ static void init_parser(Scanner *scanner, Chunk *chunk, Parser *parser) {
     parser->chunk = chunk;
 }
 
+static void free_parser(Parser *parser) {
+    free(parser->previous);
+    free(parser->current);
+}
+
 static void advance(Parser *parser) {
     free(parser->previous);
     parser->previous = parser->current;
     for (;;) {
         parser->current = scan_token(parser->scanner);
         if (parser->current->type != CLOX_TOKEN_ERROR) break;
+        error_report(parser->current, parser->current->lexeme, parser);
         free(parser->current);
     }
 }
@@ -133,7 +147,7 @@ static void grouping(Parser *parser) {
 }
 
 static void number(Parser *parser) {
-    Value value = strtod(parser->previous->lexeme, NULL);
+    Value value = NUMBER_VALUE(strtod(parser->previous->lexeme, NULL));
     emit_constant(value, parser);
 }
 
@@ -146,6 +160,7 @@ static void unary(Parser *parser) {
             emit_byte(CLOX_OP_NEGATE, parser);
             break;
         case CLOX_TOKEN_BANG:
+            emit_byte(CLOX_OP_NOT, parser);
             break;
         default:
             // never reach here
@@ -171,6 +186,42 @@ static void binary(Parser *parser) {
         case CLOX_TOKEN_SLASH:
             emit_byte(CLOX_OP_DIVIDE, parser);
             break;
+        case CLOX_TOKEN_EQUAL_EQUAL:
+            emit_byte(CLOX_OP_EQUAL, parser);
+            break;
+        case CLOX_TOKEN_BANG_EQUAL:
+            emit_bytes(parser, 2, CLOX_OP_EQUAL, CLOX_OP_NOT);
+            break;
+        case CLOX_TOKEN_GREATER:
+            emit_byte(CLOX_OP_GREATER, parser);
+            break;
+        case CLOX_TOKEN_GREATER_EQUAL:
+            emit_bytes(parser, 2, CLOX_OP_LESS, CLOX_OP_NOT);
+            break;
+        case CLOX_TOKEN_LESS:
+            emit_byte(CLOX_OP_LESS, parser);
+            break;
+        case CLOX_TOKEN_LESS_EQUAL:
+            emit_bytes(parser, 2, CLOX_OP_GREATER, CLOX_OP_NOT);
+            break;
+        default:
+            // never reach
+            break;
+    }
+}
+
+static void literal(Parser *parser) {
+    TokenType type = parser->previous->type;
+    switch (type) {
+        case CLOX_TOKEN_NIL:
+            emit_byte(CLOX_OP_NIL, parser);
+            break;
+        case CLOX_TOKEN_TRUE:
+            emit_byte(CLOX_OP_TRUE, parser);
+            break;
+        case CLOX_TOKEN_FALSE:
+            emit_byte(CLOX_OP_FALSE, parser);
+            break;
         default:
             // never reach
             break;
@@ -178,7 +229,7 @@ static void binary(Parser *parser) {
 }
 
 static void emit_byte(uint8_t byte, Parser *parser) {
-    write_chunk(parser->chunk, byte, parser->previous->location.line);
+    write_chunk(parser->chunk, byte, parser->previous->location.line, parser->previous->location.column);
 }
 
 static void emit_bytes(Parser *parser, int cnt, ...) {
@@ -189,7 +240,7 @@ static void emit_bytes(Parser *parser, int cnt, ...) {
 }
 
 static void emit_return(Parser *parser) {
-    write_chunk(parser->chunk, CLOX_OP_RETURN, parser->previous->location.line);
+    emit_byte(CLOX_OP_RETURN, parser);
 }
 
 /**

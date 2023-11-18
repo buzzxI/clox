@@ -27,6 +27,8 @@ void init_scanner(const char *source, Scanner *scanner) {
     scanner->current = source;
     scanner->start = source;
     scanner->line = 1;
+    scanner->column = 0;
+    scanner->cur_column = 0;
     // initialize trie
     scanner->keywords = (Trie*)malloc(sizeof(Trie));
     memset(scanner->keywords->children, 0, sizeof(scanner->keywords->children));
@@ -77,11 +79,24 @@ Token* scan_token(Scanner *scanner) {
         case '}': return create_token(CLOX_TOKEN_RIGHT_BRACE, scanner);
         case ',': return create_token(CLOX_TOKEN_COMMA, scanner);
         case '.': return create_token(CLOX_TOKEN_DOT, scanner);
-        case '-': return create_token(CLOX_TOKEN_MINUS, scanner);
-        case '+': return create_token(CLOX_TOKEN_PLUS, scanner);
+        case '-': {
+            if (match('-', scanner)) return create_token(CLOX_TOKEN_MINUS_MINUS, scanner);
+            if (match('=', scanner)) return create_token(CLOX_TOKEN_MINUS_EQUAL, scanner);
+            return create_token(CLOX_TOKEN_MINUS, scanner);
+        }
+        case '+': {
+            if (match('+', scanner)) return create_token(CLOX_TOKEN_PLUS_PLUS, scanner);
+            if (match('=', scanner)) return create_token(CLOX_TOKEN_PLUS_EQUAL, scanner);
+            return create_token(CLOX_TOKEN_PLUS, scanner);
+        }
         case ';': return create_token(CLOX_TOKEN_SEMICOLON, scanner);
-        case '/': return create_token(CLOX_TOKEN_SLASH, scanner);
-        case '*': return create_token(CLOX_TOKEN_STAR, scanner);
+        case '/': return create_token(match('=', scanner) ? CLOX_TOKEN_SLASH_EQUAL : CLOX_TOKEN_SLASH, scanner);
+        case '*': {
+            if (match('*', scanner)) return create_token(CLOX_TOKEN_STAR_STAR, scanner);
+            if (match('=', scanner)) return create_token(CLOX_TOKEN_STAR_EQUAL, scanner);
+            return create_token(CLOX_TOKEN_STAR, scanner);
+        }
+        case '%': return create_token(match('=', scanner) ? CLOX_TOKEN_PERCENT_EQUAL : CLOX_TOKEN_PERCENT, scanner);
         // single or double characters
         case '!': return create_token(match('=', scanner) ? CLOX_TOKEN_BANG_EQUAL : CLOX_TOKEN_BANG, scanner);
         case '=': return create_token(match('=', scanner) ? CLOX_TOKEN_EQUAL_EQUAL : CLOX_TOKEN_EQUAL, scanner);
@@ -201,6 +216,8 @@ static void skip_whitespace(Scanner *scanner) {
             case '\n':
                 scanner->line++;
                 scanner->cur_column = 0;
+                /* implicit fallthrough */
+                __attribute__((fallthrough));
             case ' ':
             case '\r':
             case '\t':

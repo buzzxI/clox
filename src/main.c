@@ -58,7 +58,7 @@ static void parse_file(const char *path) {
     // load file into memory
     size_t read_bytes = fread(content, sizeof(char), size, file);
     content[read_bytes] = '\0';
-    if (read_bytes != size) {
+    if ((long)read_bytes != size) {
         fclose(file);
         fprintf(stderr, "Could not read file \"%s\".\n", path);
         // 74 stands for input/output error
