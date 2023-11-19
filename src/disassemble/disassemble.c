@@ -36,7 +36,7 @@ int disassemble_instruction(Chunk *chunk, int offset) {
         case CLOX_OP_GREATER:       return non_operand("CLOX_OP_GREATER", offset);
         case CLOX_OP_LESS:          return non_operand("CLOX_OP_LESS", offset);
         case CLOX_OP_EQUAL:         return non_operand("CLOX_OP_EQUAL", offset);
-        default:                    break;
+        default: break;
     }
     return chunk->count;
 }
@@ -52,8 +52,8 @@ static int single_operand(const char *name, Chunk *chunk, int offset) {
     // '%-16s' will padding string (at least 16 characters width), '-' is left-justified
     // '%4d' will padding number with blank (at least 4 characters width)
     printf("%-16s %4d '", name, idx);
-    // %g => when number is greater than 1e6 or less than 1e-4 use %e, otherwise use %f
-    printf("%g\n", constant.data.number);
+    print_value(constant);
+    printf("\n");
     return offset + 2;
 }
 
@@ -63,6 +63,6 @@ static int double_operand(const char *name, Chunk *chunk, int offset) {
     uint16_t idx = (forward << 8) | backward;
     Value constant = chunk->constant.values[idx];
     printf("%-16s %4d '", name, idx);
-    printf("%g\n", constant.data.number);
+    printf("%g\n", AS_NUMBER(constant));
     return offset + 3;
 }

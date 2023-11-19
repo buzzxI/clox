@@ -2,18 +2,28 @@
 #define clox_value_h
 #include "common.h"
 
-#define NUMBER_VALUE(value) ((Value){VAL_NUMBER, {.number = value}})
-#define BOOL_VALUE(value) ((Value){VAL_BOOL, {.boolean = value}})
-#define NIL_VALUE ((Value){VAL_NIL, {.number = 0}})
+#define NUMBER_VALUE(value) ((Value){VAL_NUMBER, {.number = (value)}})
+#define BOOL_VALUE(value)   ((Value){VAL_BOOL, {.boolean = (value)}})
+#define NIL_VALUE           ((Value){VAL_NIL, {.number = 0}})
+#define OBJ_VALUE(value)    ((Value){VAL_OBJ, {.obj = (Obj*)(value)}})
 
-#define IS_NUMBER(value) ((value).type == VAL_NUMBER)
-#define IS_BOOL(value) ((value).type == VAL_BOOL)
-#define IS_NIL(value) ((value).type == VAL_NIL)
+#define AS_NUMBER(value)    ((value).data.number)
+#define AS_BOOL(value)      ((value).data.boolean)
+
+#define IS_NUMBER(value)    ((value).type == VAL_NUMBER)
+#define IS_BOOL(value)      ((value).type == VAL_BOOL)
+#define IS_NIL(value)       ((value).type == VAL_NIL)
+#define IS_OBJ(value)       ((value).type == VAL_OBJ)
+
+typedef struct Obj Obj;
+typedef struct StringObj StringObj;
+
 
 typedef enum {
     VAL_BOOL,
     VAL_NUMBER,
     VAL_NIL,
+    VAL_OBJ,
 } ValueType;
 
 typedef struct {
@@ -21,9 +31,9 @@ typedef struct {
     union {
         bool boolean;
         double number;
+        Obj *obj; 
     } data;
 } Value;
-
 
 typedef struct {
     Value *values;  // constant pool ? 

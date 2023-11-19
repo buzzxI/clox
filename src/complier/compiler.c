@@ -1,6 +1,7 @@
 #include "compiler.h"
 #include "scanner/scanner.h"
 #include "value/value.h"
+#include "object/object.h"
 // added for free token
 #include <stdlib.h>
 // added for print token
@@ -18,6 +19,7 @@ static void number(Parser *parser);
 static void unary(Parser *parser);
 static void binary(Parser *parser);
 static void literal(Parser *parser);
+static void string(Parser *parser);
 static void emit_byte(uint8_t byte, Parser *parser);
 static void emit_bytes(Parser *parser, int cnt, ...);
 static void emit_return(Parser *parser);
@@ -46,7 +48,7 @@ ParserRule rules[] = {
     [CLOX_TOKEN_LESS]          = { NULL,     binary,  PREC_COMPARISON },
     [CLOX_TOKEN_LESS_EQUAL]    = { NULL,     binary,  PREC_COMPARISON },
     [CLOX_TOKEN_IDENTIFIER]    = { NULL,     NULL,    PREC_PRIMARY },
-    [CLOX_TOKEN_STRING]        = { NULL,     NULL,    PREC_PRIMARY },
+    [CLOX_TOKEN_STRING]        = { string,   NULL,    PREC_PRIMARY },
     [CLOX_TOKEN_NUMBER]        = { number,   NULL,    PREC_PRIMARY },
     [CLOX_TOKEN_AND]           = { NULL,     binary,  PREC_AND },
     [CLOX_TOKEN_CLASS]         = { NULL,     NULL,    PREC_NONE },
@@ -226,6 +228,13 @@ static void literal(Parser *parser) {
             // never reach
             break;
     }
+}
+
+static void string(Parser *parser) {
+    // remove double quote
+    int length = parser->previous->length - 2;
+    Value value = OBJ_VALUE(new_string(parser->previous->lexeme + 1, length));
+    emit_constant(value, parser);
 }
 
 static void emit_byte(uint8_t byte, Parser *parser) {

@@ -1,5 +1,6 @@
 #include "value.h"
 #include "memory/memory.h"
+#include "object/object.h"
 // include for printf
 #include <stdio.h>
 
@@ -27,27 +28,31 @@ void free_value_array(ValueArray *array) {
 void print_value(Value value) {
     switch (value.type) {
         case VAL_BOOL:
-            printf(value.data.boolean ? "true" : "false");
+            printf(AS_BOOL(value) ? "true" : "false");
             break;
         case VAL_NUMBER:
-            printf("%g", value.data.number);
+            printf("%g", AS_NUMBER(value));
             break;
         case VAL_NIL:
             printf("nil");
+            break;
+        case VAL_OBJ:
+            print_obj(value);
             break;
     }
 }
 
 bool is_false(Value value) {
-    return IS_NIL(value) || (IS_BOOL(value) && !value.data.boolean);
+    return IS_NIL(value) || (IS_BOOL(value) && !AS_BOOL(value));
 }
 
 bool values_equal(Value a, Value b) {
     if (a.type != b.type) return false;
     switch (a.type) {
-        case VAL_BOOL: return a.data.boolean == b.data.boolean;
-        case VAL_NUMBER: return a.data.number == b.data.number;
+        case VAL_BOOL: return AS_BOOL(a) == AS_BOOL(b);
+        case VAL_NUMBER: return AS_NUMBER(a) == AS_NUMBER(b);
         case VAL_NIL: return true;
+        case VAL_OBJ: return objs_equal(a, b);
     }
     return false;
 }

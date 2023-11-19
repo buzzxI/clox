@@ -9,6 +9,7 @@ typedef struct {
     uint8_t *pc;
     Value stack[MAX_STACK];
     Value *sp;
+    Obj *objs;
 } VM;
 
 typedef enum {
@@ -18,8 +19,10 @@ typedef enum {
     INTERPRET_DEBUG,
 } InterpreterResult;
 
-void init_vm(VM *vm);
-void free_vm(VM *vm);
+extern VM vm;
+
+void init_vm();
+void free_vm();
 InterpreterResult interpret(const char *source);
 
 #endif // clox_vm_h

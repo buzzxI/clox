@@ -139,6 +139,7 @@ static Token* error_token(const char *message, Scanner *scanner) {
 
 static Token* string_token(Scanner *scanner) {
     char c;
+    // enclosed '"' has already been consumed by advance
     while (!is_end(scanner) && (c = advance(scanner)) != '"') {
         // allow multi-line string
         if (c == '\n') {
@@ -147,9 +148,7 @@ static Token* string_token(Scanner *scanner) {
         }
     }
     // unterminated string
-    if (is_end(scanner)) return error_token("unterminated string", scanner);
-    // consume enclosed '"' 
-    advance(scanner);
+    if (c != '"') return error_token("unterminated string", scanner);
     return create_token(CLOX_TOKEN_STRING, scanner);
 }
 
