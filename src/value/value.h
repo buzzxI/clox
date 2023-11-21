@@ -18,7 +18,6 @@
 typedef struct Obj Obj;
 typedef struct StringObj StringObj;
 
-
 typedef enum {
     VAL_BOOL,
     VAL_NUMBER,

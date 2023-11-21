@@ -11,8 +11,14 @@
 static void init_parser(Scanner *scanner, Chunk *chunk, Parser *parser);
 static void free_parser(Parser *parser); 
 static void advance(Parser *parser);
+static bool match (Parser *parser, int cnt, ...);
 static void consume(TokenType type, const char *message, Parser *parser);
 static void parse_precedence(Precedence precedence, Parser *parser);
+static void declarations(Parser *parser);
+static void var_declaration(Parser *parser);
+static void statement(Parser *parser);
+static void print_statement(Parser *parser);
+static void expression_statement(Parser *parser);
 static void expression(Parser *parser);
 static void grouping(Parser *parser);
 static void number(Parser *parser);
@@ -84,7 +90,9 @@ bool compile(const char *source, Chunk *chunk) {
     init_scanner(source, &scanner);
     init_parser(&scanner, chunk, &parser);
     advance(&parser);
-    expression(&parser);
+
+    while (!match(&parser, 1, CLOX_TOKEN_EOF)) declarations(&parser);
+
     // just for represent expression result
     emit_return(&parser);
     free_scanner(&scanner);
@@ -118,6 +126,21 @@ static void advance(Parser *parser) {
     }
 }
 
+// check current token type
+static bool match(Parser *parser, int cnt, ...) {
+    va_list args;
+    va_start(args, cnt);
+    for (int i = 0; i < cnt; i++) {
+        if (parser->current->type == va_arg(args, TokenType)) {
+            advance(parser);
+            va_end(args);
+            return true;
+        }
+    }
+    va_end(args);
+    return false;
+}
+
 static void consume(TokenType type, const char *message, Parser *parser) {
     if (parser->current->type == type) advance(parser);
     else error_report(parser->current, message, parser);
@@ -137,6 +160,32 @@ static void parse_precedence(Precedence precedence, Parser *parser) {
         parser_func infix = rules[parser->previous->type].infix;
         infix(parser);
     }
+}
+
+static void declarations(Parser *parser) {
+    if (match(parser, 1, CLOX_TOKEN_VAR)) var_declaration(parser);
+    else statement(parser);
+}
+
+static void var_declaration(Parser *parser) {
+
+    consume(CLOX_TOKEN_IDENTIFIER, "Expect variable name.", parser);
+}
+
+static void statement(Parser *parser) {
+    if (match(parser, 1, CLOX_TOKEN_PRINT)) print_statement(parser);
+    else expression_statement(parser);
+}
+
+static void print_statement(Parser *parser) {
+    expression(parser);
+    consume(CLOX_TOKEN_SEMICOLON, "Expect ';' after value.", parser);
+    emit_byte(CLOX_OP_PRINT, parser);
+}
+
+static void expression_statement(Parser *parser) {
+    expression(parser);
+    consume(CLOX_TOKEN_SEMICOLON, "Expect ';' after expression.", parser);
 }
 
 static void expression(Parser *parser) {

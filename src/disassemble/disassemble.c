@@ -36,6 +36,7 @@ int disassemble_instruction(Chunk *chunk, int offset) {
         case CLOX_OP_GREATER:       return non_operand("CLOX_OP_GREATER", offset);
         case CLOX_OP_LESS:          return non_operand("CLOX_OP_LESS", offset);
         case CLOX_OP_EQUAL:         return non_operand("CLOX_OP_EQUAL", offset);
+        case CLOX_OP_PRINT:         return non_operand("CLOX_OP_PRINT", offset);
         default: break;
     }
     return chunk->count;

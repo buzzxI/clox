@@ -20,6 +20,7 @@ typedef enum {
     CLOX_OP_EQUAL,
     CLOX_OP_GREATER,
     CLOX_OP_LESS,
+    CLOX_OP_PRINT,
 } OpCode;
 
 typedef struct {

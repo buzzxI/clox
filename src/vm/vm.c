@@ -22,10 +22,12 @@ void init_vm() {
     vm.chunk = NULL;
     vm.pc = NULL;
     vm.objs = NULL;
+    init_table(&vm.strings);
 }
 
 void free_vm() {
     free_objs();
+    free_table(&vm.strings);
 }
 
 InterpreterResult interpret(const char *source) {
@@ -81,8 +83,6 @@ static InterpreterResult run() {
         uint8_t instruction = READ_BYTE();
         switch (instruction) {
             case CLOX_OP_RETURN:
-                print_value(pop());
-                printf("\n");
                 return INTERPRET_OK;
             case CLOX_OP_CONSTANT:
                 push(READ_CONSTANT());
@@ -151,6 +151,11 @@ static InterpreterResult run() {
                     vm.pc++;
                     BINARY_OP(BOOL_VALUE, >=);
                 } else BINARY_OP(BOOL_VALUE, <);
+                break;
+
+            case CLOX_OP_PRINT:
+                print_value(pop());
+                printf("\n");
                 break;
             default:
                 break;
