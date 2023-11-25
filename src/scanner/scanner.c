@@ -14,7 +14,8 @@ static bool is_end(Scanner *scanner);
 static char advance(Scanner *scanner);
 static char peek(int offset, Scanner *scanner);
 static bool match(char c, Scanner *scanner);
-static void skip_whitespace(Scanner *scanner);
+static int fast_forward(Scanner *scanner);
+static int skip_whitespace(Scanner *scanner);
 static int skip_comment(Scanner *scanner);
 static bool is_digit(char c);
 static bool is_alpha(char c);
@@ -58,13 +59,9 @@ void free_scanner(Scanner *scanner) {
 }
 
 Token* scan_token(Scanner *scanner) {
-    skip_whitespace(scanner);
-    while (1) {
-        int is_comment = skip_comment(scanner);
-        if (is_comment < 0) return error_token("unterminated comment", scanner);
-        if (is_comment == 0) break;
-    }
-    
+
+    if (fast_forward(scanner) < 0) return error_token("unterminated comment", scanner);
+
     scanner->start = scanner->current;
     scanner->column = scanner->cur_column;
 
@@ -208,7 +205,17 @@ static bool match(char c, Scanner *scanner) {
     return true;
 }
 
-static void skip_whitespace(Scanner *scanner) {
+static int fast_forward(Scanner *scanner) {
+    while (1) {
+        int whitspace = skip_whitespace(scanner);
+        int comment = skip_comment(scanner);
+        if (comment < 0) return comment;
+        if (!whitspace && !comment) return 0;
+    }
+}
+
+static int skip_whitespace(Scanner *scanner) {
+    int flag = 0;
     for (;;) {
         char c = peek(0, scanner);
         switch (c) {
@@ -221,9 +228,10 @@ static void skip_whitespace(Scanner *scanner) {
             case '\r':
             case '\t':
                 advance(scanner);
+                flag = 1;
                 break; 
             default:
-                return;
+                return flag;
         }
     }
 }

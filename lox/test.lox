@@ -1,1 +1,12 @@
-print "abc" + "def" + "ghi" + "jkl";
+// {
+//     var a = 1;
+//     var b = 2;
+//     var c = 3;
+//     var d = 4;
+//     a = b + c * d;
+//     print a;
+// }
+
+var a = "abc";
+var a = a;
+print a;

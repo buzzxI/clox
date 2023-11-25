@@ -3,7 +3,7 @@
 #include "chunk/chunk.h"
 #include "table/table.h"
 
-#define MAX_STACK 256
+#define MAX_STACK (UINT16_MAX + 1)
 
 typedef struct {
     Chunk *chunk;
@@ -12,6 +12,7 @@ typedef struct {
     Value *sp;
     Obj *objs;
     Table strings;
+    Table globals;
 } VM;
 
 typedef enum {

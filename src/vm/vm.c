@@ -1,8 +1,8 @@
+#include "common.h"
 #include "vm.h"
 #include "disassemble/disassemble.h"
 #include "complier/compiler.h"
 #include "object/object.h"
-#include "common.h"
 // added for print constants
 #include <stdio.h>
 // added for wrap format print
@@ -10,10 +10,11 @@
 
 static void reset_stack();
 static InterpreterResult run();
+static void* read_bytes(int num);
 static void runtime_error(const char *format, ...);
 static void push(Value value);
 static Value pop();
-// static Value peek(VM *vm, int distance);
+static Value peek(int distance);
 
 VM vm;
 
@@ -23,11 +24,13 @@ void init_vm() {
     vm.pc = NULL;
     vm.objs = NULL;
     init_table(&vm.strings);
+    init_table(&vm.globals);
 }
 
 void free_vm() {
     free_objs();
     free_table(&vm.strings);
+    free_table(&vm.globals);
 }
 
 InterpreterResult interpret(const char *source) {
@@ -57,10 +60,9 @@ static void reset_stack() {
 }
 
 static InterpreterResult run() {
-#define READ_BYTE()         (*vm.pc++)
 #define PEEK_BYTE()         (*vm.pc)
-#define READ_CONSTANT()     (vm.chunk->constant.values[READ_BYTE()])
-#define READ_CONSTANT_16()  (vm.chunk->constant.values[(READ_BYTE() << 8) | (READ_BYTE())])
+#define READ_CONSTANT()     (vm.chunk->constant.values[(*(uint8_t*)read_bytes(1))])
+#define READ_CONSTANT_16()  (vm.chunk->constant.values[(*(uint16_t*)(read_bytes(2)))])
 #define BINARY_OP(val_type, op) do {\
         Value b = pop();\
         Value a = pop();\
@@ -80,10 +82,13 @@ static InterpreterResult run() {
         printf("%%sp]\n");
         disassemble_instruction(vm.chunk, (int)(vm.pc - vm.chunk->code));
 #endif
-        uint8_t instruction = READ_BYTE();
-        switch (instruction) {
-            case CLOX_OP_RETURN:
-                return INTERPRET_OK;
+        uint8_t *instruction = read_bytes(1);
+        if (instruction == NULL) {
+            runtime_error("running out of file.");
+            return INTERPRET_RUNTIME_ERROR;
+        }
+        switch (*instruction) {
+            case CLOX_OP_RETURN: return INTERPRET_OK;
             case CLOX_OP_CONSTANT:
                 push(READ_CONSTANT());
                 break;
@@ -152,20 +157,100 @@ static InterpreterResult run() {
                     BINARY_OP(BOOL_VALUE, >=);
                 } else BINARY_OP(BOOL_VALUE, <);
                 break;
-
             case CLOX_OP_PRINT:
                 print_value(pop());
                 printf("\n");
                 break;
-            default:
+            case CLOX_OP_POP:
+                uint8_t *num = read_bytes(1);
+                for (int i = 0; i < *num; i++) pop();
                 break;
+            case CLOX_OP_DEFINE_GLOBAL:{
+                StringObj *identifier = AS_STRING(READ_CONSTANT());
+                table_put(identifier, pop(), &vm.globals);
+                break;
+            }
+            case CLOX_OP_DEFINE_GLOBAL_16: {
+                StringObj *identifier = AS_STRING(READ_CONSTANT_16());
+                table_put(identifier, pop(), &vm.globals);
+                break;
+            }
+            case CLOX_OP_GET_GLOBAL: {
+                StringObj *identifier = AS_STRING(READ_CONSTANT());
+                Value value;
+                if (!table_get(identifier, &value, &vm.globals)) {
+                    runtime_error("undefined variable '%s'.", identifier->str);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                push(value);
+                break;
+            }
+            case CLOX_OP_GET_GLOBAL_16: {
+                StringObj *identifier = AS_STRING(READ_CONSTANT_16());
+                Value value;
+                if (!table_get(identifier, &value, &vm.globals)) {
+                    runtime_error("undefined variable '%s'.", identifier->str);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                push(value);
+                break;
+            }
+            case CLOX_OP_SET_GLOBAL: {
+                StringObj *identifier = AS_STRING(READ_CONSTANT());
+                if (!table_get(identifier, NULL, &vm.globals)) {
+                    runtime_error("undefined variable '%s'.", identifier->str);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                table_put(identifier, peek(0), &vm.globals);
+                break;
+            }
+            case CLOX_OP_SET_GLOBAL_16: {
+                StringObj *identifier = AS_STRING(READ_CONSTANT_16());
+                if (!table_get(identifier, NULL, &vm.globals)) {
+                    runtime_error("undefined variable '%s'.", identifier->str);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                table_put(identifier, peek(0), &vm.globals);
+                break;
+            }
+            case CLOX_OP_GET_LOCAL: {
+                uint8_t *slot = read_bytes(1);
+                push(vm.stack[*slot]);
+                break;
+            }
+            case CLOX_OP_GET_LOCAL_16: {
+                uint16_t *slot = read_bytes(2);
+                push(vm.stack[*slot]);
+                break;
+            }
+            case CLOX_OP_SET_LOCAL: {
+                uint8_t *slot = read_bytes(1);
+                vm.stack[*slot] = peek(0);
+                break;
+            }
+            case CLOX_OP_SET_LOCAL_16: {
+                uint16_t *slot = read_bytes(2);
+                vm.stack[*slot] = peek(0);
+                break;
+            }
+            default: break;
         }
     }
-#undef READ_BYTE
+#undef INCREMENT_PC
 #undef PEEK_BYTE
 #undef READ_CONSTANT
 #undef READ_CONSTANT_16
 #undef BINARY_OP
+}
+
+static void* read_bytes(int num) {
+    void *rst = vm.pc;
+    vm.pc += num;
+    if (vm.pc - vm.chunk->code > vm.chunk->count) {
+        vm.pc = vm.chunk->code + vm.chunk->count - 1;
+        rst = NULL;
+    } 
+    return rst;
 }
 
 static void runtime_error(const char *format, ...) {
@@ -193,6 +278,6 @@ static Value pop() {
     return *vm.sp; 
 }
 
-// static Value peek(VM *vm, int distance) {
-//     return vm->sp[-1 - distance];
-// }
+static Value peek(int distance) {
+    return vm.sp[-1 - distance];
+}

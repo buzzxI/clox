@@ -4,6 +4,8 @@
 #include "scanner/scanner.h"
 #include "chunk/chunk.h"
 
+#define MAX_STACK (UINT16_MAX + 1)
+
 typedef enum {
   PREC_NONE,
   PREC_ASSIGNMENT,  // =
@@ -19,16 +21,32 @@ typedef enum {
 } Precedence;
 
 typedef struct {
-    Token *previous;
-    Token *current; 
-    bool had_error;
-    bool panic_mode;
+  Token *previous;
+  Token *current; 
+  bool had_error;
+  bool panic_mode;
 
-    Scanner *scanner;
-    Chunk *chunk;
+  Scanner *scanner;
+  Chunk *chunk;
 } Parser;
 
-typedef void (*parser_func)(Parser *);
+typedef struct {
+  Token name;
+  int depth;
+} Local;
+
+typedef struct {
+  Local locals[MAX_STACK];
+  int local_count;
+  int scope_depth;
+} Resolver;
+
+typedef struct {
+  Parser *parser;
+  Resolver *resolver;
+} Compiler;
+
+typedef void (*parser_func)(Compiler *, bool);
 
 typedef struct {
   parser_func prefix;
