@@ -233,6 +233,21 @@ static InterpreterResult run() {
                 vm.stack[*slot] = peek(0);
                 break;
             }
+            case CLOX_OP_JUMP_IF_FALSE: {
+                uint16_t *offset = read_bytes(2);
+                if (is_false(peek(0))) vm.pc += *offset;
+                break;
+            }
+            case CLOX_OP_JUMP: {
+                uint16_t *offset = read_bytes(2);
+                vm.pc += *offset;
+                break;
+            }
+            case CLOX_OP_LOOP: {
+                uint16_t *offset = read_bytes(2);
+                vm.pc -= *offset;
+                break;
+            }
             default: break;
         }
     }

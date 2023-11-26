@@ -31,10 +31,11 @@ typedef enum {
 
     /**
      * who knows
-     * '%', '**', '++', '--', '+=', '-=', '*=', '/=', '%='
+     * '%', '**', '++', '--', '+=', '-=', '*=', '/=', '%=', 'xor'
      */
     CLOX_TOKEN_PERCENT, CLOX_TOKEN_STAR_STAR, CLOX_TOKEN_PLUS_PLUS, CLOX_TOKEN_MINUS_MINUS, 
     CLOX_TOKEN_PLUS_EQUAL, CLOX_TOKEN_MINUS_EQUAL, CLOX_TOKEN_STAR_EQUAL, CLOX_TOKEN_SLASH_EQUAL, CLOX_TOKEN_PERCENT_EQUAL,
+    CLOX_TOKEN_XOR,
 } TokenType;
 
 typedef struct {

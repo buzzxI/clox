@@ -2,6 +2,7 @@
 #define clox_object_h
 #include "common.h"
 #include "value/value.h"
+#include "chunk/chunk.h"
 
 #define OBJ_TYPE(value)     ((value).data.obj->type)
 #define IS_STRING(value)    (isObjType(value, OBJ_STRING))
@@ -13,6 +14,7 @@
 typedef enum {
     OBJ_STRING,
     OBJ_INSTANCE,
+    ObJ_FUNCTION,
 } ObjType;
 
 struct Obj {
@@ -27,6 +29,13 @@ struct StringObj {
     uint32_t hash;
 };
 
+typedef struct {
+    Obj obj;
+    StringObj *name;
+    int arity;
+    Chunk code;
+} FunctionObj;
+
 static inline bool isObjType(Value value, ObjType type) {
     return IS_OBJ(value) && OBJ_TYPE(value) == type;
 };
@@ -36,6 +45,8 @@ bool objs_equal(Value a, Value b);
 
 StringObj *new_string(const char *str, int length);
 Value append_string(Value a, Value b);
+
+Function *new_function();
 
 void free_objs();
 

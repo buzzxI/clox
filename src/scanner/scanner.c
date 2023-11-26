@@ -52,6 +52,9 @@ void init_scanner(const char *source, Scanner *scanner) {
     add_keyword("true", CLOX_TOKEN_TRUE, scanner);
     add_keyword("var", CLOX_TOKEN_VAR, scanner);
     add_keyword("while", CLOX_TOKEN_WHILE, scanner);
+    
+    // features
+    add_keyword("xor", CLOX_TOKEN_XOR, scanner);
 }
 
 void free_scanner(Scanner *scanner) {

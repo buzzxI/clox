@@ -9,6 +9,7 @@
 typedef enum {
   PREC_NONE,
   PREC_ASSIGNMENT,  // =
+  PREC_XOR,         // xor
   PREC_OR,          // or
   PREC_AND,         // and
   PREC_EQUALITY,    // == !=

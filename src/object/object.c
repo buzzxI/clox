@@ -50,6 +50,14 @@ Value append_string(Value a, Value b) {
     return OBJ_VALUE(take_string(heap_str, length));
 }
 
+FunctionObj* new_function() {
+    FunctionObj *function = (FunctionObj*)new_obj(OBJ_FUNCTION, sizeof(FunctionObj));
+    function->arity = 0;
+    function->name = NULL;
+    init_chunk(&function->chunk);
+    return function;
+}
+
 void free_objs() {
     Obj *objs = vm.objs;
     while (objs) {

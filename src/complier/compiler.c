@@ -35,6 +35,9 @@ static void print_statement(Compiler *compiler);
 static void block(Compiler *compiler);
 static void begin_scope(Resolver *resolver);
 static void end_scope(Compiler *compiler);
+static void if_statement(Compiler *compiler);
+static void while_statement(Compiler *compiler);
+static void for_statement(Compiler *compiler);
 static void expression_statement(Compiler *compiler);
 static void expression(Compiler *compiler);
 static void variable(Compiler *compiler, bool assign);
@@ -45,11 +48,17 @@ static void unary(Compiler *compiler, bool assign);
 static void binary(Compiler *parser, bool assign);
 static void literal(Compiler *compiler, bool assign);
 static void string(Compiler *compiler, bool assign);
+static void and(Compiler *compiler, bool assign);
+static void or(Compiler *compiler, bool assign);
+static void xor(Compiler *compiler, bool assign);
 static void emit_byte(uint8_t byte, Parser *parser);
 static void emit_bytes(Parser *parser, int cnt, ...);
 static void emit_return(Parser *parser);
 static void emit_constant(Value value, Parser *parser);
 static uint16_t make_constant(Value value, Parser *parser);
+static int emit_jump(Parser *parser, uint8_t instruction);
+static void emit_loop(Parser *parser, int start);
+static void patch_jump(Parser *parser, int offset);
 static void error_report(Token *token, const char *message, Parser *parser);
 static void synchronize(Parser *parser);
 
@@ -77,7 +86,7 @@ ParserRule rules[] = {
     [CLOX_TOKEN_IDENTIFIER]    = { variable, NULL,    PREC_PRIMARY },
     [CLOX_TOKEN_STRING]        = { string,   NULL,    PREC_PRIMARY },
     [CLOX_TOKEN_NUMBER]        = { number,   NULL,    PREC_PRIMARY },
-    [CLOX_TOKEN_AND]           = { NULL,     binary,  PREC_AND },
+    [CLOX_TOKEN_AND]           = { NULL,     and,     PREC_AND },
     [CLOX_TOKEN_CLASS]         = { NULL,     NULL,    PREC_NONE },
     [CLOX_TOKEN_ELSE]          = { NULL,     NULL,    PREC_NONE },
     [CLOX_TOKEN_FALSE]         = { literal,  NULL,    PREC_PRIMARY },
@@ -85,7 +94,7 @@ ParserRule rules[] = {
     [CLOX_TOKEN_FOR]           = { NULL,     NULL,    PREC_NONE },
     [CLOX_TOKEN_IF]            = { NULL,     NULL,    PREC_NONE },
     [CLOX_TOKEN_NIL]           = { literal,  NULL,    PREC_PRIMARY },
-    [CLOX_TOKEN_OR]            = { NULL,     binary,  PREC_OR },
+    [CLOX_TOKEN_OR]            = { NULL,     or,      PREC_OR },
     [CLOX_TOKEN_PRINT]         = { NULL,     NULL,    PREC_NONE },
     [CLOX_TOKEN_RETURN]        = { NULL,     NULL,    PREC_NONE },
     [CLOX_TOKEN_SUPER]         = { NULL,     NULL,    PREC_NONE },
@@ -103,6 +112,7 @@ ParserRule rules[] = {
     [CLOX_TOKEN_STAR_EQUAL]    = { NULL,     NULL,    PREC_NONE },
     [CLOX_TOKEN_SLASH_EQUAL]   = { NULL,     NULL,    PREC_NONE },
     [CLOX_TOKEN_PERCENT_EQUAL] = { NULL,     NULL,    PREC_NONE },
+    [CLOX_TOKEN_XOR]           = { NULL,     xor,     PREC_XOR },
 };
 
 bool compile(const char *source, Chunk *chunk) {
@@ -250,7 +260,7 @@ static void define_local(Resolver *resolver) {
 }
 
 static void define_global(Parser *parser, uint16_t idx) {
-    if (idx > UINT8_MAX) emit_bytes(parser, 3, CLOX_OP_DEFINE_GLOBAL_16, idx >> 8, idx & 0xff);
+    if (idx > UINT8_MAX) emit_bytes(parser, 3, CLOX_OP_DEFINE_GLOBAL_16, idx & 0xff, idx >> 8);
     else emit_bytes(parser, 2, CLOX_OP_DEFINE_GLOBAL, idx);
 }
 
@@ -260,7 +270,9 @@ static void statement(Compiler *compiler) {
         begin_scope(compiler->resolver);
         block(compiler);
         end_scope(compiler);
-    }
+    } else if (match(compiler->parser, 1, CLOX_TOKEN_IF)) if_statement(compiler);
+    else if (match(compiler->parser, 1, CLOX_TOKEN_WHILE)) while_statement(compiler); 
+    else if (match(compiler->parser, 1, CLOX_TOKEN_FOR)) for_statement(compiler);
     else expression_statement(compiler);
 }
 
@@ -283,8 +295,93 @@ static void end_scope(Compiler *compiler) {
     compiler->resolver->scope_depth--;
     int i = compiler->resolver->local_count - 1;
     for (; compiler->resolver->locals[i].depth > compiler->resolver->scope_depth && i >= 0; i--);
-    emit_bytes(compiler->parser, 2, CLOX_OP_POP, compiler->resolver->local_count - 1 - i);
+    int cnt = compiler->resolver->local_count - 1 - i;
+    if (cnt > 0) emit_bytes(compiler->parser, 2, CLOX_OP_POP, compiler->resolver->local_count - 1 - i);
     compiler->resolver->local_count = i + 1;
+}
+
+static void if_statement(Compiler *compiler) {
+    consume(CLOX_TOKEN_LEFT_PAREN, "Expect '(' after 'if'.", compiler->parser);
+    // if condition 
+    expression(compiler); 
+    consume(CLOX_TOKEN_RIGHT_PAREN, "Expect ')' after condition.", compiler->parser);
+
+    int if_offset = emit_jump(compiler->parser, CLOX_OP_JUMP_IF_FALSE);
+    // pop condition expression on true
+    emit_bytes(compiler->parser, 2, CLOX_OP_POP, 1);
+    
+    statement(compiler);
+    int else_offset = emit_jump(compiler->parser, CLOX_OP_JUMP);
+    patch_jump(compiler->parser, if_offset);
+    // pop condition expression on false
+    emit_bytes(compiler->parser, 2, CLOX_OP_POP, 1);
+    
+    if (match(compiler->parser, 1, CLOX_TOKEN_ELSE)) statement(compiler);
+
+    patch_jump(compiler->parser, else_offset);
+}
+
+static void while_statement(Compiler *compiler) {
+    consume(CLOX_TOKEN_LEFT_PAREN, "Expect '(' after 'while'.", compiler->parser);
+    int start = compiler->parser->chunk->count;
+    expression(compiler);
+    consume(CLOX_TOKEN_RIGHT_PAREN, "Expect ')' after condition.", compiler->parser);
+    int end_while = emit_jump(compiler->parser, CLOX_OP_JUMP_IF_FALSE);
+    // pop condition expression on true
+    emit_bytes(compiler->parser, 2, CLOX_OP_POP, 1);
+    statement(compiler);
+    emit_loop(compiler->parser, start);
+    patch_jump(compiler->parser, end_while);
+    // pop condition expression on false
+    emit_bytes(compiler->parser, 2, CLOX_OP_POP, 1);
+}
+
+static void for_statement(Compiler *compiler) {
+    // desugar 'for' into 'while', add a scope for initializer
+    begin_scope(compiler->resolver);
+    consume(CLOX_TOKEN_LEFT_PAREN, "Expect '(' after 'for'.", compiler->parser);
+    
+    // initializer
+    if (!match(compiler->parser, 1, CLOX_TOKEN_SEMICOLON)) {
+        // variable declaration or expression (use statement to pop temporary value and consume ';')
+        if (match(compiler->parser, 1, CLOX_TOKEN_VAR)) var_declaration(compiler);
+        else expression_statement(compiler);
+    }
+
+    // condition
+    int start = compiler->parser->chunk->count;
+    int end_for = -1;
+    if (!match(compiler->parser, 1, CLOX_TOKEN_SEMICOLON)) {
+        expression(compiler);
+        consume(CLOX_TOKEN_SEMICOLON, "Expect ';' after loop condition.", compiler->parser);
+        end_for = emit_jump(compiler->parser, CLOX_OP_JUMP_IF_FALSE);
+        // pop condition expression on true
+        emit_bytes(compiler->parser, 2, CLOX_OP_POP, 1);
+    }
+
+    // increment
+    if (!match(compiler->parser, 1, CLOX_TOKEN_RIGHT_PAREN)) {
+        int body = emit_jump(compiler->parser, CLOX_OP_JUMP);
+        int increment = compiler->parser->chunk->count;
+        expression(compiler);
+        consume(CLOX_TOKEN_RIGHT_PAREN, "Expect ')' after for clauses.", compiler->parser);
+        emit_bytes(compiler->parser, 2, CLOX_OP_POP, 1);
+        emit_loop(compiler->parser, start);
+        start = increment;
+        patch_jump(compiler->parser, body);
+    }
+
+    // body
+    statement(compiler);
+    emit_loop(compiler->parser, start);
+    
+    if (end_for != -1) {
+        patch_jump(compiler->parser, end_for);
+        // pop condition expression on false
+        emit_bytes(compiler->parser, 2, CLOX_OP_POP, 1);
+    }
+
+    end_scope(compiler);
 }
 
 static void expression_statement(Compiler *compiler) {
@@ -317,7 +414,7 @@ static void parse_precedence(Precedence precedence, Compiler *compiler) {
 
 static void variable(Compiler *compiler, bool assign) {
 #define PARSE_VARIABLE(operation, idx, scope) do {\
-        if ((idx) > UINT8_MAX) emit_bytes(compiler->parser, 3, CLOX_OP_##operation##_##scope##_16, (idx) >> 8, (idx) & 0xff);\
+        if ((idx) > UINT8_MAX) emit_bytes(compiler->parser, 3, CLOX_OP_##operation##_##scope##_16, (idx) & 0xff, (idx) >> 8);\
         else emit_bytes(compiler->parser, 2, CLOX_OP_##operation##_##scope, (idx));\
     } while(0);
     
@@ -455,6 +552,37 @@ static void string(Compiler *compiler, bool assign) {
     emit_constant(value, compiler->parser);
 }
 
+static void and(Compiler *compiler, bool assign) {
+    int if_jump = emit_jump(compiler->parser, CLOX_OP_JUMP_IF_FALSE);
+    // pop on left operand is true
+    emit_bytes(compiler->parser, 2, CLOX_OP_POP, 1);
+    parse_precedence(PREC_AND, compiler);
+    patch_jump(compiler->parser, if_jump);
+}
+
+static void or(Compiler *compiler, bool assign) {
+    int else_jump = emit_jump(compiler->parser, CLOX_OP_JUMP_IF_FALSE);
+    int end_jump = emit_jump(compiler->parser, CLOX_OP_JUMP);
+    patch_jump(compiler->parser, else_jump);
+    // pop on left operand is false
+    emit_bytes(compiler->parser, 2, CLOX_OP_POP, 1);
+    parse_precedence(PREC_OR, compiler);
+    patch_jump(compiler->parser, end_jump);
+}
+
+static void xor(Compiler *compiler, bool assign) {
+    parse_precedence(PREC_XOR, compiler);
+    int if_jump = emit_jump(compiler->parser, CLOX_OP_JUMP_IF_FALSE);
+    // pop on right operand is true
+    emit_bytes(compiler->parser, 2, CLOX_OP_POP, 1);
+    emit_byte(CLOX_OP_NOT, compiler->parser);
+    int pop_jump = emit_jump(compiler->parser, CLOX_OP_JUMP);
+    patch_jump(compiler->parser, if_jump);
+    // pop on right operand is false
+    emit_bytes(compiler->parser, 2, CLOX_OP_POP, 1);
+    patch_jump(compiler->parser, pop_jump);
+}
+
 static void emit_byte(uint8_t byte, Parser *parser) {
     write_chunk(parser->chunk, byte, parser->previous->location.line, parser->previous->location.column);
 }
@@ -472,7 +600,7 @@ static void emit_return(Parser *parser) {
 
 static void emit_constant(Value value, Parser *parser) {
     uint16_t idx = make_constant(value, parser);
-    if (idx > UINT8_MAX) emit_bytes(parser, 3, CLOX_OP_CONSTANT_16, idx >> 8, idx & 0xff);
+    if (idx > UINT8_MAX) emit_bytes(parser, 3, CLOX_OP_CONSTANT_16, idx & 0xff, idx >> 8);
     else emit_bytes(parser, 2, CLOX_OP_CONSTANT, idx);
 }
 
@@ -483,6 +611,30 @@ static uint16_t make_constant(Value value, Parser *parser) {
     int idx = append_constant(parser->chunk, value);
     if (idx > UINT16_MAX) error_report(parser->previous, "Too many constants in one chunk.", parser);
     return (uint16_t)idx;
+}
+
+static int emit_jump(Parser *parser, uint8_t instruction) {
+    emit_bytes(parser, 3, instruction, 0xff, 0xff);
+    return parser->chunk->count - 2;
+}
+
+// patch distance from current to @param: offset to @param:offset
+// program at @param: offset, read 2 Bytes, may jump to current position
+// -> offset       |
+// -> offset + 1   |
+//     ...         | ---- 
+//     ...         |    | -> @return: jump (caled by current function)
+// -> current      | ----
+static void patch_jump(Parser *parser, int offset) {
+    int jump = parser->chunk->count - offset - 2; 
+    if (jump > UINT16_MAX) error_report(parser->previous, "Too much code to jump over.", parser);
+    parser->chunk->code[offset] = jump & 0xff;
+    parser->chunk->code[offset + 1] = (jump >> 8) & 0xff;
+}
+
+static void emit_loop(Parser *parser, int start) {
+    int jump = parser->chunk->count - start + 3;
+    emit_bytes(parser, 3, CLOX_OP_LOOP, jump & 0xff, (jump >> 8) & 0xff);
 }
 
 static void error_report(Token *token, const char *message, Parser *parser) {

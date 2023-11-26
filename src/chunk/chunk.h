@@ -32,6 +32,9 @@ typedef enum {
     CLOX_OP_GET_LOCAL_16,
     CLOX_OP_SET_LOCAL,
     CLOX_OP_SET_LOCAL_16,
+    CLOX_OP_JUMP_IF_FALSE,
+    CLOX_OP_JUMP,
+    CLOX_OP_LOOP,
 } OpCode;
 
 typedef struct {

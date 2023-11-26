@@ -54,6 +54,9 @@ int disassemble_instruction(Chunk *chunk, int offset) {
         case CLOX_OP_GET_LOCAL_16:      return double_operand("CLOX_OP_GET_LOCAL_16", chunk, offset);
         case CLOX_OP_SET_LOCAL:         return single_operand("CLOX_OP_SET_LOCAL", chunk, offset);
         case CLOX_OP_SET_LOCAL_16:      return double_operand("CLOX_OP_SET_LOCAL_16", chunk, offset);
+        case CLOX_OP_JUMP_IF_FALSE:     return double_operand("CLOX_OP_JUMP_IF_FALSE", chunk, offset);
+        case CLOX_OP_JUMP:              return double_operand("CLOX_OP_JUMP", chunk, offset);
+        case CLOX_OP_LOOP:              return double_operand("CLOX_OP_LOOP", chunk, offset);
         default: break;
     }
     return chunk->count;
@@ -108,5 +111,5 @@ static uint8_t single_byte(Chunk *chunk, int offset) {
 static uint16_t double_bytes(Chunk *chunk, int offset) {
     uint8_t forward = chunk->code[offset + 1];
     uint8_t backward = chunk->code[offset + 2];
-    return (forward << 8) | backward;
+    return (backward << 8) | forward;
 }
