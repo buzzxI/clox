@@ -32,6 +32,8 @@ INC_FLAGS := $(addprefix -I,$(INC_DIRS))
 CPPFLAGS := $(INC_FLAGS) -MMD -MP 
 PPFLAGS := -E
 CFLAGS := -Wall -Wextra
+# link libmath
+LDFLAGS := -lm
 
 # Optional debug flag (-g)
 DEBUG ?= 0

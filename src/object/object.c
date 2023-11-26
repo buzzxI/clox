@@ -20,6 +20,8 @@ void print_obj(Value value) {
         case OBJ_INSTANCE:
             printf("<instance>");
             break;
+        case OBJ_FUNCTION:
+            printf("<lox function %s>", AS_FUNCTION(value)->name->str);
     }
 } 
 
@@ -28,6 +30,7 @@ bool objs_equal(Value a, Value b) {
     switch (OBJ_TYPE(a)) {
         case OBJ_STRING: return AS_STRING(a) == AS_STRING(b);
         case OBJ_INSTANCE: return false;
+        case OBJ_FUNCTION: return AS_FUNCTION(a) == AS_FUNCTION(b);
     }
     return false;
 }
@@ -54,7 +57,7 @@ FunctionObj* new_function() {
     FunctionObj *function = (FunctionObj*)new_obj(OBJ_FUNCTION, sizeof(FunctionObj));
     function->arity = 0;
     function->name = NULL;
-    init_chunk(&function->chunk);
+    init_chunk(&function->code);
     return function;
 }
 
@@ -85,6 +88,11 @@ static void free_obj(Obj *obj) {
             break;
         case OBJ_INSTANCE:
             // FREE(, obj);
+            break;
+        case OBJ_FUNCTION:
+            FunctionObj *function = (FunctionObj*)obj;
+            free_chunk(&function->code);
+            FREE(FunctionObj, obj);
             break;
         default:
             break;

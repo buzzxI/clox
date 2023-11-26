@@ -7,6 +7,7 @@
 #include <stdio.h>
 // added for wrap format print
 #include <stdarg.h>
+#include <math.h>
 
 static void reset_stack();
 static InterpreterResult run();
@@ -133,6 +134,28 @@ static InterpreterResult run() {
             case CLOX_OP_DIVIDE:
                 BINARY_OP(NUMBER_VALUE, /);
                 break;
+            case CLOX_OP_MODULO: {
+                Value b = pop();
+                Value a = pop();
+                if (!IS_NUMBER(a) || !IS_NUMBER(b)) { 
+                    runtime_error("operands must be numbers.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                int64_t x = (int64_t)AS_NUMBER(a);
+                int64_t y = (int64_t)AS_NUMBER(b);
+                push(NUMBER_VALUE(x % y));
+                break;
+            }
+            case CLOX_OP_POWER: {
+                Value b = pop();
+                Value a = pop();
+                if (!IS_NUMBER(a) || !IS_NUMBER(b)) { 
+                    runtime_error("operands must be numbers.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                push(NUMBER_VALUE(pow(AS_NUMBER(a), AS_NUMBER(b))));
+                break;
+            }
             case CLOX_OP_NOT:
                 push(BOOL_VALUE(is_false(pop())));
                 break;

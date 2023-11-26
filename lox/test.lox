@@ -12,5 +12,4 @@
 //     print i;
 //     i = i - 1;
 // }
-
-print true xor false xor false xor true xor true;
+print -2 ** 2;

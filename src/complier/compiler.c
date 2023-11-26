@@ -103,8 +103,8 @@ ParserRule rules[] = {
     [CLOX_TOKEN_VAR]           = { NULL,     NULL,    PREC_NONE },
     [CLOX_TOKEN_WHILE]         = { NULL,     NULL,    PREC_NONE },
     [CLOX_TOKEN_EOF]           = { NULL,     NULL,    PREC_NONE },
-    [CLOX_TOKEN_STAR_STAR]     = { NULL,     NULL,    PREC_NONE },
-    [CLOX_TOKEN_PERCENT]       = { NULL,     NULL,    PREC_NONE },
+    [CLOX_TOKEN_PERCENT]       = { NULL,     binary,  PREC_FACTOR },
+    [CLOX_TOKEN_STAR_STAR]     = { NULL,     binary,  PREC_EXPONENT },
     [CLOX_TOKEN_PLUS_PLUS]     = { NULL,     NULL,    PREC_NONE },
     [CLOX_TOKEN_MINUS_MINUS]   = { NULL,     NULL,    PREC_NONE },
     [CLOX_TOKEN_PLUS_EQUAL]    = { NULL,     NULL,    PREC_NONE },
@@ -502,6 +502,12 @@ static void binary(Compiler *compiler, bool assign) {
             break;
         case CLOX_TOKEN_SLASH:
             emit_byte(CLOX_OP_DIVIDE, compiler->parser);
+            break;
+        case CLOX_TOKEN_PERCENT:
+            emit_byte(CLOX_OP_MODULO, compiler->parser);
+            break;
+        case CLOX_TOKEN_STAR_STAR:
+            emit_byte(CLOX_OP_POWER, compiler->parser);
             break;
         case CLOX_TOKEN_EQUAL_EQUAL:
             emit_byte(CLOX_OP_EQUAL, compiler->parser);

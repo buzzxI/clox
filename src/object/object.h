@@ -7,14 +7,16 @@
 #define OBJ_TYPE(value)     ((value).data.obj->type)
 #define IS_STRING(value)    (isObjType(value, OBJ_STRING))
 #define IS_INSTANCE(value)  (isObjType(value, OBJ_INSTANCE))
+#define IS_FUNCTION(value)  (isObjType(value, OBJ_FUNCTION))
 
 #define AS_STRING(value)    ((StringObj*)(value).data.obj)
 #define AS_CSTRING(value)   (((StringObj*)(value).data.obj)->str)
+#define AS_FUNCTION(value)  ((FunctionObj*)(value).data.obj)
 
 typedef enum {
     OBJ_STRING,
     OBJ_INSTANCE,
-    ObJ_FUNCTION,
+    OBJ_FUNCTION,
 } ObjType;
 
 struct Obj {
@@ -46,7 +48,7 @@ bool objs_equal(Value a, Value b);
 StringObj *new_string(const char *str, int length);
 Value append_string(Value a, Value b);
 
-Function *new_function();
+FunctionObj *new_function();
 
 void free_objs();
 

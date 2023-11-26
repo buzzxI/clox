@@ -38,6 +38,7 @@ int disassemble_instruction(Chunk *chunk, int offset) {
         case CLOX_OP_SUBTRACT:          return non_operand("CLOX_OP_SUBTRACT", offset);
         case CLOX_OP_MULTIPLY:          return non_operand("CLOX_OP_MULTIPLY", offset);
         case CLOX_OP_DIVIDE:            return non_operand("CLOX_OP_DIVIDE", offset);
+        case CLOX_OP_MODULO:            return non_operand("CLOX_OP_MODULO", offset);
         case CLOX_OP_NOT:               return non_operand("CLOX_OP_NOT", offset);
         case CLOX_OP_GREATER:           return non_operand("CLOX_OP_GREATER", offset);
         case CLOX_OP_LESS:              return non_operand("CLOX_OP_LESS", offset);
