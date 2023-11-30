@@ -3,11 +3,19 @@
 #include "chunk/chunk.h"
 #include "table/table.h"
 
-#define MAX_STACK (UINT16_MAX + 1)
+#define UINT8_COUNT (UINT8_MAX + 1)
+#define FRAMES_MAX (UINT8_COUNT)
+#define MAX_STACK ((FRAMES_MAX) * (UINT8_COUNT))
 
 typedef struct {
-    Chunk *chunk;
+    FunctionObj *function;
     uint8_t *pc;
+    Value *slots; 
+} CallFrame;
+
+typedef struct {
+    CallFrame frames[FRAMES_MAX];
+    int frame_cnt;
     Value stack[MAX_STACK];
     Value *sp;
     Obj *objs;

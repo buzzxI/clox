@@ -58,6 +58,7 @@ int disassemble_instruction(Chunk *chunk, int offset) {
         case CLOX_OP_JUMP_IF_FALSE:     return double_operand("CLOX_OP_JUMP_IF_FALSE", chunk, offset);
         case CLOX_OP_JUMP:              return double_operand("CLOX_OP_JUMP", chunk, offset);
         case CLOX_OP_LOOP:              return double_operand("CLOX_OP_LOOP", chunk, offset);
+        case CLOX_OP_CALL:              return single_operand("CLOX_OP_CALL", chunk, offset);
         default: break;
     }
     return chunk->count;

@@ -7,9 +7,42 @@
 //     print a;
 // }
 
-// var i = 10;
-// for (; i >= 0;) {
-//     print i;
-//     i = i - 1;
+var i = 10;
+for (; i >= 0;) {
+    print i;
+    i = i - 1;
+}
+
+// fun test() {
+//     test();
+//     print "fun";
 // }
-print -2 ** 2;
+// print test;
+// test();
+
+// fun a() { b(); }
+// fun b() { c(); }
+// fun c() {
+//   c("too", "many");
+// }
+
+// a();
+
+// Returns the nth Fibonacci number
+// fun fibonacci(n) {
+//   if (n == 0) {
+//     return 0;
+//   } else if (n == 1) {
+//     return 1;
+//   } else {
+//     return fibonacci(n - 1) + fibonacci(n - 2);
+//   }
+// }
+// var begin = clock();
+// print fibonacci(35);
+// var end = clock();
+// print end - begin;
+// begin = clock();
+// print fibonacci(15);
+// end = clock();
+// print end - begin;

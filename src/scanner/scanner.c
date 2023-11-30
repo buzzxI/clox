@@ -1,7 +1,6 @@
 #include "scanner.h"
 #include "common.h"
-// added for malloc token
-#include <stdlib.h>
+#include "memory/memory.h"
 // addef for string operation
 #include <string.h>
 
@@ -24,14 +23,16 @@ static void add_keyword(const char *keyword, TokenType type, Scanner *scanner);
 static TokenType check_keyword(Scanner *scanner);
 static void free_trie(Trie *trie);
 
-void init_scanner(const char *source, Scanner *scanner) {
+Scanner* init_scanner(const char *source) {
+    Scanner *scanner = ALLOCATE(Scanner, 1);
     scanner->current = source;
     scanner->start = source;
     scanner->line = 1;
     scanner->column = 0;
     scanner->cur_column = 0;
+    
     // initialize trie
-    scanner->keywords = (Trie*)malloc(sizeof(Trie));
+    scanner->keywords = ALLOCATE(Trie, 1);
     memset(scanner->keywords->children, 0, sizeof(scanner->keywords->children));
     scanner->keywords->type = CLOX_TOKEN_ERROR;
 
@@ -55,10 +56,12 @@ void init_scanner(const char *source, Scanner *scanner) {
     
     // features
     add_keyword("xor", CLOX_TOKEN_XOR, scanner);
+    return scanner;
 }
 
 void free_scanner(Scanner *scanner) {
     free_trie(scanner->keywords);
+    FREE(Scanner, scanner);
 }
 
 Token* scan_token(Scanner *scanner) {
@@ -115,7 +118,7 @@ Token* scan_token(Scanner *scanner) {
  * create a token with @param type 
  */
 static Token* create_token(TokenType type, Scanner *scanner) {
-    Token *token = (Token*)malloc(sizeof(Token));
+    Token *token = ALLOCATE(Token, 1);
     token->type = type;
     token->lexeme = scanner->start;
     token->length = scanner->current - scanner->start;
@@ -128,7 +131,7 @@ static Token* create_token(TokenType type, Scanner *scanner) {
  * create a error typed token with @param message  
  */
 static Token* error_token(const char *message, Scanner *scanner) {
-    Token *token = (Token*)malloc(sizeof(Token));
+    Token *token = ALLOCATE(Token, 1);
     token->type = CLOX_TOKEN_ERROR;
     token->lexeme = message;
     token->length = strlen(message);
@@ -303,7 +306,7 @@ static void add_keyword(const char *keyword, TokenType type, Scanner *scanner) {
     for (const char *c = keyword; *c != '\0'; c++) {
         int i = *c - 'a';
         if (node->children[i] == NULL) {
-            node->children[i] = (Trie*)malloc(sizeof(Trie));
+            node->children[i] = ALLOCATE(Trie, 1);
             memset(node->children[i]->children, 0, sizeof(node->children[i]->children));
             node->children[i]->type = CLOX_TOKEN_ERROR;
         }
@@ -315,7 +318,7 @@ static void add_keyword(const char *keyword, TokenType type, Scanner *scanner) {
 static void free_trie(Trie* trie) {
     if (trie == NULL) return;
     for (int i = 0; i < 26; i++) free_trie(trie->children[i]);
-    free(trie);
+    FREE(Trie, trie);
 }
 
 static TokenType check_keyword(Scanner *scanner) {

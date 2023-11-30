@@ -17,15 +17,17 @@
 
 typedef struct Obj Obj;
 typedef struct StringObj StringObj;
+typedef struct FunctionObj FunctionObj;
+typedef struct NativeObj NativeObj;
 
-typedef enum {
+typedef enum ValueType {
     VAL_BOOL,
     VAL_NUMBER,
     VAL_NIL,
     VAL_OBJ,
 } ValueType;
 
-typedef struct {
+typedef struct Value {
     ValueType type;
     union {
         bool boolean;
@@ -34,7 +36,7 @@ typedef struct {
     } data;
 } Value;
 
-typedef struct {
+typedef struct ValueArray {
     Value *values;  // constant pool ? 
     int capacity;   // size of memory allocated
     int count;      // size of memory used

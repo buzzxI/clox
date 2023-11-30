@@ -21,16 +21,23 @@ void print_obj(Value value) {
             printf("<instance>");
             break;
         case OBJ_FUNCTION:
-            printf("<lox function %s>", AS_FUNCTION(value)->name->str);
+            FunctionObj *function = AS_FUNCTION(value);
+            if (function->name == NULL) printf("<clox script>");
+            else printf("<clox function %s>", function->name->str);
+            break;
+        case OBJ_NATIVE:
+            printf("<native function %s>", AS_NATIVE(value)->name->str);
+            break;
     }
 } 
 
 bool objs_equal(Value a, Value b) {
     if (OBJ_TYPE(a) != OBJ_TYPE(b)) return false;
     switch (OBJ_TYPE(a)) {
-        case OBJ_STRING: return AS_STRING(a) == AS_STRING(b);
-        case OBJ_INSTANCE: return false;
-        case OBJ_FUNCTION: return AS_FUNCTION(a) == AS_FUNCTION(b);
+        case OBJ_STRING:    return AS_STRING(a) == AS_STRING(b);
+        case OBJ_INSTANCE:  return false;
+        case OBJ_FUNCTION:  return AS_FUNCTION(a) == AS_FUNCTION(b);
+        case OBJ_NATIVE:    return AS_NATIVE(a) == AS_NATIVE(b);
     }
     return false;
 }
@@ -57,8 +64,15 @@ FunctionObj* new_function() {
     FunctionObj *function = (FunctionObj*)new_obj(OBJ_FUNCTION, sizeof(FunctionObj));
     function->arity = 0;
     function->name = NULL;
-    init_chunk(&function->code);
+    init_chunk(&function->chunk);
     return function;
+}
+
+NativeObj* new_native(native_func func, StringObj *name) {
+    NativeObj *native = (NativeObj*)new_obj(OBJ_NATIVE, sizeof(NativeObj));
+    native->native = func;
+    native->name = name;
+    return native;
 }
 
 void free_objs() {
@@ -91,8 +105,11 @@ static void free_obj(Obj *obj) {
             break;
         case OBJ_FUNCTION:
             FunctionObj *function = (FunctionObj*)obj;
-            free_chunk(&function->code);
+            free_chunk(&function->chunk);
             FREE(FunctionObj, obj);
+            break;
+        case OBJ_NATIVE:
+            FREE(NativeObj, obj);
             break;
         default:
             break;

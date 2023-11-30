@@ -1,70 +1,137 @@
 #include "compiler.h"
 #include "scanner/scanner.h"
-#include "value/value.h"
+#include "chunk/chunk.h"
 #include "object/object.h"
-// added for free token
-#include <stdlib.h>
+#include "memory/memory.h"
 // added for print token
 #include <stdio.h>
 // added for use va_list
 #include <stdarg.h>
-// addef for memcmp
+// added for memcmp
 #include <string.h>
+// added for strtod
+#include <stdlib.h>
 
-static void init_parser(Scanner *scanner, Chunk *chunk, Parser *parser);
-static void free_parser(Parser *parser); 
-static void init_resolver(Resolver *resolver);
-static void free_resolver(Resolver *resolver);
-static void advance(Parser *parser);
-static bool match (Parser *parser, int cnt, ...);
-static void consume(TokenType type, const char *message, Parser *parser);
-static bool check(Parser *parser, TokenType type);
-static void parse_precedence(Precedence precedence, Compiler *compiler);
-static void declarations(Compiler *compiler);
-static void var_declaration(Compiler *compiler);
-static void local_declaration(Compiler *compiler);
-static void global_declaration(Compiler *complier);
-static void declare_local(Compiler *compiler);
+typedef enum {
+    TYPE_SCRIPT,
+    TYPE_FUNCTION,
+} FunctionType;
+
+typedef enum {
+    PREC_NONE,
+    PREC_ASSIGNMENT,  // =
+    PREC_XOR,         // xor
+    PREC_OR,          // or
+    PREC_AND,         // and
+    PREC_EQUALITY,    // == !=
+    PREC_COMPARISON,  // < > <= >=
+    PREC_TERM,        // + -
+    PREC_FACTOR,      // * / %
+    PREC_UNARY,       // ! -
+    PREC_EXPONENT,    // **
+    PREC_CALL,        // . ()
+    PREC_PRIMARY      // literal
+} Precedence;
+
+typedef struct {
+    Token *previous;
+    Token *current; 
+    bool had_error;
+    bool panic_mode;
+
+    Scanner *scanner;
+} Parser;
+
+typedef struct {
+    Token name;
+    int depth;
+} Local;
+
+typedef struct Resolver{
+    struct Resolver *enclose;
+
+    Local locals[UINT16_COUNT];
+    int local_count;
+    int scope_depth;
+
+    FunctionObj *function;
+    FunctionType type;
+} Resolver;
+
+typedef void (*parser_func)(bool);
+
+typedef struct {
+    parser_func prefix;
+    parser_func infix;
+    Precedence precedence;
+} ParserRule;
+
+// there is only one parser in the whole program
+Parser *parser;
+// however, there may be multiple resolvers
+Resolver *current_resolver = NULL;
+
+static void init_parser(const char *source);
+static void free_parser(); 
+static void init_resolver(FunctionType type);
+static FunctionObj* free_resolver();
+static Chunk* current_chunk();
+static void advance();
+static bool match (int cnt, ...);
+static void consume(TokenType type, const char *message);
+static bool check(TokenType type);
+static void parse_precedence(Precedence precedence);
+static void declarations();
+static void var_declaration();
+static void local_declaration();
+static void global_declaration();
+static void declare_local();
 static bool token_equal(Token *a, Token *b);
-static uint16_t declare_global(Parser *parser);
-static void variable_initializer(Compiler *compiler);
-static void define_local(Resolver *resolver);
-static void define_global(Parser *parser, uint16_t idx);
-static void statement(Compiler *compiler);
-static void print_statement(Compiler *compiler);
-static void block(Compiler *compiler);
-static void begin_scope(Resolver *resolver);
-static void end_scope(Compiler *compiler);
-static void if_statement(Compiler *compiler);
-static void while_statement(Compiler *compiler);
-static void for_statement(Compiler *compiler);
-static void expression_statement(Compiler *compiler);
-static void expression(Compiler *compiler);
-static void variable(Compiler *compiler, bool assign);
-static int resolve_local(Compiler *compiler, Token* token);
-static void grouping(Compiler *compiler, bool assign);
-static void number(Compiler *compiler, bool assign);
-static void unary(Compiler *compiler, bool assign);
-static void binary(Compiler *parser, bool assign);
-static void literal(Compiler *compiler, bool assign);
-static void string(Compiler *compiler, bool assign);
-static void and(Compiler *compiler, bool assign);
-static void or(Compiler *compiler, bool assign);
-static void xor(Compiler *compiler, bool assign);
-static void emit_byte(uint8_t byte, Parser *parser);
-static void emit_bytes(Parser *parser, int cnt, ...);
-static void emit_return(Parser *parser);
-static void emit_constant(Value value, Parser *parser);
-static uint16_t make_constant(Value value, Parser *parser);
-static int emit_jump(Parser *parser, uint8_t instruction);
-static void emit_loop(Parser *parser, int start);
-static void patch_jump(Parser *parser, int offset);
-static void error_report(Token *token, const char *message, Parser *parser);
-static void synchronize(Parser *parser);
+static uint16_t declare_global();
+static void variable_initializer();
+static void define_local();
+static void define_global(uint16_t idx);
+static void function_declaration();
+static void function();
+static void statement();
+static void print_statement();
+static void block();
+static void begin_scope();
+static void end_scope();
+static void if_statement();
+static void while_statement();
+static void for_statement();
+static void return_statement();
+static void expression_statement();
+static void expression();
+static void variable(bool assign);
+static int resolve_local(Token* token);
+static void grouping(bool assign);
+static void call(bool assign);
+static uint8_t argument_list();
+static void number(bool assign);
+static void unary(bool assign);
+static void binary(bool assign);
+static void literal(bool assign);
+static void string(bool assign);
+static void and(bool assign);
+static void or(bool assign);
+static void xor(bool assign);
+static void emit_byte(uint8_t byte);
+static void emit_bytes(int cnt, ...);
+static void emit_nil_return();
+static void emit_return();
+static void emit_constant(Value value);
+static uint16_t make_constant(Value value);
+static int emit_jump(uint8_t instruction);
+static void emit_loop(int start);
+static void patch_jump(int offset);
+static void error_report(Token *token, const char *message);
+static void synchronize();
 
 ParserRule rules[] = {
     [CLOX_TOKEN_ERROR]         = { NULL,     NULL,    PREC_NONE },
-    [CLOX_TOKEN_LEFT_PAREN]    = { grouping, NULL,    PREC_NONE },
+    [CLOX_TOKEN_LEFT_PAREN]    = { grouping, call,    PREC_CALL },
     [CLOX_TOKEN_RIGHT_PAREN]   = { NULL,     NULL,    PREC_NONE },
     [CLOX_TOKEN_LEFT_BRACE]    = { NULL,     NULL,    PREC_NONE },
     [CLOX_TOKEN_RIGHT_BRACE]   = { NULL,     NULL,    PREC_NONE },
@@ -75,7 +142,7 @@ ParserRule rules[] = {
     [CLOX_TOKEN_SEMICOLON]     = { NULL,     NULL,    PREC_NONE },
     [CLOX_TOKEN_SLASH]         = { NULL,     binary,  PREC_FACTOR },
     [CLOX_TOKEN_STAR]          = { NULL,     binary,  PREC_FACTOR },
-    [CLOX_TOKEN_BANG]          = { unary,    NULL,    PREC_UNARY },
+    [CLOX_TOKEN_BANG]          = { unary,    NULL,    PREC_NONE },
     [CLOX_TOKEN_BANG_EQUAL]    = { NULL,     binary,  PREC_EQUALITY },
     [CLOX_TOKEN_EQUAL]         = { NULL,     NULL,    PREC_NONE },
     [CLOX_TOKEN_EQUAL_EQUAL]   = { NULL,     binary,  PREC_EQUALITY },
@@ -83,23 +150,23 @@ ParserRule rules[] = {
     [CLOX_TOKEN_GREATER_EQUAL] = { NULL,     binary,  PREC_COMPARISON },
     [CLOX_TOKEN_LESS]          = { NULL,     binary,  PREC_COMPARISON },
     [CLOX_TOKEN_LESS_EQUAL]    = { NULL,     binary,  PREC_COMPARISON },
-    [CLOX_TOKEN_IDENTIFIER]    = { variable, NULL,    PREC_PRIMARY },
-    [CLOX_TOKEN_STRING]        = { string,   NULL,    PREC_PRIMARY },
-    [CLOX_TOKEN_NUMBER]        = { number,   NULL,    PREC_PRIMARY },
+    [CLOX_TOKEN_IDENTIFIER]    = { variable, NULL,    PREC_NONE },
+    [CLOX_TOKEN_STRING]        = { string,   NULL,    PREC_NONE },
+    [CLOX_TOKEN_NUMBER]        = { number,   NULL,    PREC_NONE },
     [CLOX_TOKEN_AND]           = { NULL,     and,     PREC_AND },
     [CLOX_TOKEN_CLASS]         = { NULL,     NULL,    PREC_NONE },
     [CLOX_TOKEN_ELSE]          = { NULL,     NULL,    PREC_NONE },
-    [CLOX_TOKEN_FALSE]         = { literal,  NULL,    PREC_PRIMARY },
+    [CLOX_TOKEN_FALSE]         = { literal,  NULL,    PREC_NONE },
     [CLOX_TOKEN_FUN]           = { NULL,     NULL,    PREC_NONE },
     [CLOX_TOKEN_FOR]           = { NULL,     NULL,    PREC_NONE },
     [CLOX_TOKEN_IF]            = { NULL,     NULL,    PREC_NONE },
-    [CLOX_TOKEN_NIL]           = { literal,  NULL,    PREC_PRIMARY },
+    [CLOX_TOKEN_NIL]           = { literal,  NULL,    PREC_NONE },
     [CLOX_TOKEN_OR]            = { NULL,     or,      PREC_OR },
     [CLOX_TOKEN_PRINT]         = { NULL,     NULL,    PREC_NONE },
     [CLOX_TOKEN_RETURN]        = { NULL,     NULL,    PREC_NONE },
     [CLOX_TOKEN_SUPER]         = { NULL,     NULL,    PREC_NONE },
     [CLOX_TOKEN_THIS]          = { NULL,     NULL,    PREC_NONE },
-    [CLOX_TOKEN_TRUE]          = { literal,  NULL,    PREC_PRIMARY },
+    [CLOX_TOKEN_TRUE]          = { literal,  NULL,    PREC_NONE },
     [CLOX_TOKEN_VAR]           = { NULL,     NULL,    PREC_NONE },
     [CLOX_TOKEN_WHILE]         = { NULL,     NULL,    PREC_NONE },
     [CLOX_TOKEN_EOF]           = { NULL,     NULL,    PREC_NONE },
@@ -115,74 +182,99 @@ ParserRule rules[] = {
     [CLOX_TOKEN_XOR]           = { NULL,     xor,     PREC_XOR },
 };
 
-bool compile(const char *source, Chunk *chunk) {
-    Parser parser;
-    Scanner scanner;
-    init_scanner(source, &scanner);
-    init_parser(&scanner, chunk, &parser);
-    Resolver resolver; 
-    init_resolver(&resolver);
-    Compiler compiler;
-    compiler.parser = &parser;
-    compiler.resolver = &resolver;
-    
-    advance(compiler.parser);
-    while (!match(&parser, 1, CLOX_TOKEN_EOF)) {
-        declarations(&compiler);
-    }
+FunctionObj* compile(const char *source) {
+    init_parser(source);
+    init_resolver(TYPE_SCRIPT);
 
-    // just for represent expression result
-    emit_return(&parser);
-    free_scanner(&scanner);
-    free_parser(&parser);
-    free_resolver(&resolver);
-    return !parser.had_error;
+    advance();
+    while (!match(1, CLOX_TOKEN_EOF)) {
+        declarations();
+    }
+    
+    FunctionObj *rst = free_resolver(); 
+    free_parser();
+    return rst;
 }
 
-static void init_parser(Scanner *scanner, Chunk *chunk, Parser *parser) {
+static void init_parser(const char *source) {
+    parser = ALLOCATE(Parser, 1);
     parser->previous = NULL;
     parser->current = NULL;
     parser->had_error = false;
     parser->panic_mode = false;
-    
-    parser->scanner = scanner;
-    parser->chunk = chunk;
+    parser->scanner = init_scanner(source);
 }
 
-static void free_parser(Parser *parser) {
-    free(parser->previous);
-    free(parser->current);
+static void free_parser() {
+    FREE(Token, parser->previous);
+    FREE(Token, parser->current);
+    free_scanner(parser->scanner);
+    parser->scanner = NULL;
+    FREE(Parser, parser);
 }
 
-static void init_resolver(Resolver *resolver) {
+static void init_resolver(FunctionType type) {
+    Resolver *resolver = ALLOCATE(Resolver, 1); 
+
     resolver->local_count = 0;
     resolver->scope_depth = 0;
+
+    // first local is reserved for implicit function (self)
+    Local *local = &resolver->locals[resolver->local_count++];
+    local->depth = 0;
+    local->name.lexeme = "";
+    local->name.length = 0;
+
+    resolver->function = new_function();
+    if (type != TYPE_SCRIPT) {
+        // function name
+        resolver->function->name = new_string(parser->previous->lexeme, parser->previous->length);
+    }
+    resolver->type = type;
+
+    resolver->enclose = current_resolver;
+    current_resolver = resolver;
 }
 
-static void free_resolver(Resolver *resolver) {
-    // nothing to do
-    init_resolver(resolver);
+static FunctionObj* free_resolver() {
+    emit_return();
+    
+    FunctionObj *function = current_resolver->function;
+
+    bool error = parser->had_error;
+#ifdef  CLOX_DEBUG_DISASSEMBLE 
+    if (error) disassemble_chunk(current_chunk(), function->name == NULL ? "clox script", function->name->str);
+#endif  // CLOX_DEBUG_DISASSEMBLE
+    
+    Resolver *resolver = current_resolver;
+    current_resolver = current_resolver->enclose; 
+    FREE(Resolver, resolver);
+    return error ? NULL : function;
 }
 
-static void advance(Parser *parser) {
-    free(parser->previous);
+static Chunk* current_chunk() {
+    return &current_resolver->function->chunk;
+}
+
+static void advance() {
+    FREE(Token, parser->previous);
     parser->previous = parser->current;
     for (;;) {
         parser->current = scan_token(parser->scanner);
-        if (!check(parser, CLOX_TOKEN_ERROR)) break;
-        error_report(parser->current, parser->current->lexeme, parser);
-        free(parser->current);
+        if (!check(CLOX_TOKEN_ERROR)) break;
+        error_report(parser->current, parser->current->lexeme);
+        FREE(Token, parser->current);
     }
 }
 
 // check current token type
-static bool match(Parser *parser, int cnt, ...) {
+static bool match(int cnt, ...) {
     va_list args;
     va_start(args, cnt);
     bool flag = false;
     for (int i = 0; i < cnt && !flag; i++) {
-        if (check(parser, va_arg(args, TokenType))) {
-            advance(parser);
+        if (check(va_arg(args, TokenType))) {
+            advance();
             flag = true; 
         }
     }
@@ -190,50 +282,51 @@ static bool match(Parser *parser, int cnt, ...) {
     return flag;
 }
 
-static void consume(TokenType type, const char *message, Parser *parser) {
-    if (check(parser, type)) advance(parser);
-    else error_report(parser->current, message, parser);
+static void consume(TokenType type, const char *message) {
+    if (check(type)) advance();
+    else error_report(parser->current, message);
 }
 
-static bool check(Parser *parser, TokenType type) {
+static bool check(TokenType type) {
     return parser->current->type == type;
 }
 
-static void declarations(Compiler *compiler) {
-    if (match(compiler->parser, 1, CLOX_TOKEN_VAR)) var_declaration(compiler);
-    else statement(compiler);
-    if (compiler->parser->panic_mode) synchronize(compiler->parser);
+static void declarations() {
+    if (match(1, CLOX_TOKEN_VAR)) var_declaration();
+    else if(match(1, CLOX_TOKEN_FUN)) function_declaration();
+    else statement();
+    if (parser->panic_mode) synchronize();
 }
 
-static void var_declaration(Compiler *compiler) {
-    consume(CLOX_TOKEN_IDENTIFIER, "Expect variable name.", compiler->parser);
-    if (compiler->resolver->scope_depth > 0) local_declaration(compiler);
-    else global_declaration(compiler);
-    consume(CLOX_TOKEN_SEMICOLON, "Expect ';' after variable declaration.", compiler->parser);
+static void var_declaration() {
+    consume(CLOX_TOKEN_IDENTIFIER, "Expect variable name.");
+    if (current_resolver->scope_depth > 0) local_declaration();
+    else global_declaration();
+    consume(CLOX_TOKEN_SEMICOLON, "Expect ';' after variable declaration.");
 }
 
-static void local_declaration(Compiler *compiler) {
-    declare_local(compiler);
-    variable_initializer(compiler);
-    define_local(compiler->resolver);
+static void local_declaration() {
+    declare_local();
+    variable_initializer();
+    define_local();
 }
 
-static void global_declaration(Compiler *compiler) {
-    uint16_t global_idx = declare_global(compiler->parser);
-    variable_initializer(compiler);
-    define_global(compiler->parser, global_idx);
+static void global_declaration() {
+    uint16_t global_idx = declare_global();
+    variable_initializer();
+    define_global(global_idx);
 }
 
-static void declare_local(Compiler *compiler) {
-    Token *identifier = compiler->parser->previous;
-    if (compiler->resolver->local_count == MAX_STACK) error_report(identifier, "Too many local variables in function.", compiler->parser);
+static void declare_local() {
+    Token *identifier = parser->previous;
+    if (current_resolver->local_count == UINT16_COUNT) error_report(identifier, "Too many local variables in function.");
     else {
-        for (int i = compiler->resolver->local_count - 1; i >= 0; i--) {
-            Local *local = &compiler->resolver->locals[i];
-            if (local->depth != -1 && local->depth < compiler->resolver->scope_depth) break;
-            if (token_equal(identifier, &local->name)) error_report(identifier, "Already variable with this name in this scope.", compiler->parser);
+        for (int i = current_resolver->local_count - 1; i >= 0; i--) {
+            Local *local = &current_resolver->locals[i];
+            if (local->depth != -1 && local->depth < current_resolver->scope_depth) break;
+            if (token_equal(identifier, &local->name)) error_report(identifier, "Already variable with this name in this scope.");
         }
-        Local *local = &compiler->resolver->locals[compiler->resolver->local_count++];
+        Local *local = &current_resolver->locals[current_resolver->local_count++];
         local->name = *identifier;
         local->depth = -1;
     }
@@ -244,185 +337,237 @@ static bool token_equal(Token *a, Token *b) {
     return memcmp(a->lexeme, b->lexeme, a->length) == 0;
 }
 
-static uint16_t declare_global(Parser *parser) {
+static uint16_t declare_global() {
     Token *identifier = parser->previous;
-    return make_constant(OBJ_VALUE(new_string(identifier->lexeme, identifier->length)), parser);
+    return make_constant(OBJ_VALUE(new_string(identifier->lexeme, identifier->length)));
 }
 
-static void variable_initializer(Compiler *compiler) {
+static void variable_initializer() {
     // initializer
-    if (match(compiler->parser, 1, CLOX_TOKEN_EQUAL)) expression(compiler);
-    else emit_byte(CLOX_OP_NIL, compiler->parser);
+    if (match(1, CLOX_TOKEN_EQUAL)) expression();
+    else emit_byte(CLOX_OP_NIL);
 }
 
-static void define_local(Resolver *resolver) {
-    resolver->locals[resolver->local_count - 1].depth = resolver->scope_depth;
+static void define_local() {
+    current_resolver->locals[current_resolver->local_count - 1].depth = current_resolver->scope_depth;
 }
 
-static void define_global(Parser *parser, uint16_t idx) {
-    if (idx > UINT8_MAX) emit_bytes(parser, 3, CLOX_OP_DEFINE_GLOBAL_16, idx & 0xff, idx >> 8);
-    else emit_bytes(parser, 2, CLOX_OP_DEFINE_GLOBAL, idx);
+static void define_global(uint16_t idx) {
+    if (idx > UINT8_MAX) emit_bytes(3, CLOX_OP_DEFINE_GLOBAL_16, idx & 0xff, idx >> 8);
+    else emit_bytes(2, CLOX_OP_DEFINE_GLOBAL, idx);
 }
 
-static void statement(Compiler *compiler) {
-    if (match(compiler->parser, 1, CLOX_TOKEN_PRINT)) print_statement(compiler);
-    else if (match(compiler->parser, 1, CLOX_TOKEN_LEFT_BRACE)) {
-        begin_scope(compiler->resolver);
-        block(compiler);
-        end_scope(compiler);
-    } else if (match(compiler->parser, 1, CLOX_TOKEN_IF)) if_statement(compiler);
-    else if (match(compiler->parser, 1, CLOX_TOKEN_WHILE)) while_statement(compiler); 
-    else if (match(compiler->parser, 1, CLOX_TOKEN_FOR)) for_statement(compiler);
-    else expression_statement(compiler);
+static void function_declaration() {
+    consume(CLOX_TOKEN_IDENTIFIER, "Expect function name.");
+    // declare and define function before compile body
+    if (current_resolver->scope_depth > 0) {
+        declare_local();
+        function(TYPE_FUNCTION);
+        define_local();
+    } else {
+        uint16_t idx = declare_global();
+        function(TYPE_FUNCTION);
+        define_global(idx);
+    }
 }
 
-static void print_statement(Compiler *compiler) {
-    expression(compiler);
-    consume(CLOX_TOKEN_SEMICOLON, "Expect ';' after value.", compiler->parser);
-    emit_byte(CLOX_OP_PRINT, compiler->parser);
+static void function(FunctionType type) {
+    init_resolver(type);
+    begin_scope();
+    consume(CLOX_TOKEN_LEFT_PAREN, "Expect '(' after function name.");
+    if (!check(CLOX_TOKEN_RIGHT_PAREN)) {
+        do {
+            current_resolver->function->arity++;
+            // limit function paratemer count
+            if (current_resolver->function->arity == 256) error_report(parser->current, "Can't have more than 255 parameters.");
+            consume(CLOX_TOKEN_IDENTIFIER, "Expect parameter name.");
+            declare_local();
+            define_local();
+        } while (match(1, CLOX_TOKEN_COMMA));
+    }
+    consume(CLOX_TOKEN_RIGHT_PAREN, "Expect ')' after function parameters list.");
+    consume(CLOX_TOKEN_LEFT_BRACE, "Expect '{' before function body.");
+
+    block();
+    // optional
+    end_scope();
+
+    FunctionObj *self = free_resolver();
+    emit_bytes(2, CLOX_OP_CONSTANT, make_constant(OBJ_VALUE(self)));
 }
 
-static void block(Compiler *compiler) {
-    while (!check(compiler->parser, CLOX_TOKEN_RIGHT_BRACE) && !check(compiler->parser, CLOX_TOKEN_EOF)) declarations(compiler);
-    consume(CLOX_TOKEN_RIGHT_BRACE, "Expect '}' after block.", compiler->parser);
+static void statement() {
+    if (match(1, CLOX_TOKEN_PRINT)) print_statement();
+    else if (match(1, CLOX_TOKEN_LEFT_BRACE)) {
+        begin_scope(current_resolver);
+        block();
+        end_scope();
+    } else if (match(1, CLOX_TOKEN_IF)) if_statement();
+    else if (match(1, CLOX_TOKEN_WHILE)) while_statement(); 
+    else if (match(1, CLOX_TOKEN_FOR)) for_statement();
+    else if (match(1, CLOX_TOKEN_RETURN)) return_statement();
+    else expression_statement();
 }
 
-static void begin_scope(Resolver *resolver) {
-    resolver->scope_depth++;
+static void print_statement() {
+    expression();
+    consume(CLOX_TOKEN_SEMICOLON, "Expect ';' after value.");
+    emit_byte(CLOX_OP_PRINT);
 }
 
-static void end_scope(Compiler *compiler) {
-    compiler->resolver->scope_depth--;
-    int i = compiler->resolver->local_count - 1;
-    for (; compiler->resolver->locals[i].depth > compiler->resolver->scope_depth && i >= 0; i--);
-    int cnt = compiler->resolver->local_count - 1 - i;
-    if (cnt > 0) emit_bytes(compiler->parser, 2, CLOX_OP_POP, compiler->resolver->local_count - 1 - i);
-    compiler->resolver->local_count = i + 1;
+static void block() {
+    while (!check(CLOX_TOKEN_RIGHT_BRACE) && !check(CLOX_TOKEN_EOF)) declarations();
+    consume(CLOX_TOKEN_RIGHT_BRACE, "Expect '}' after block.");
 }
 
-static void if_statement(Compiler *compiler) {
-    consume(CLOX_TOKEN_LEFT_PAREN, "Expect '(' after 'if'.", compiler->parser);
+static void begin_scope() {
+    current_resolver->scope_depth++;
+}
+
+static void end_scope() {
+    current_resolver->scope_depth--;
+    int i = current_resolver->local_count - 1;
+    for (; current_resolver->locals[i].depth > current_resolver->scope_depth && i >= 0; i--);
+    int cnt = current_resolver->local_count - 1 - i;
+    if (cnt > 0) emit_bytes(2, CLOX_OP_POP, current_resolver->local_count - 1 - i);
+    current_resolver->local_count = i + 1;
+}
+
+static void if_statement() {
+    consume(CLOX_TOKEN_LEFT_PAREN, "Expect '(' after 'if'.");
     // if condition 
-    expression(compiler); 
-    consume(CLOX_TOKEN_RIGHT_PAREN, "Expect ')' after condition.", compiler->parser);
+    expression(); 
+    consume(CLOX_TOKEN_RIGHT_PAREN, "Expect ')' after condition.");
 
-    int if_offset = emit_jump(compiler->parser, CLOX_OP_JUMP_IF_FALSE);
+    int if_offset = emit_jump(CLOX_OP_JUMP_IF_FALSE);
     // pop condition expression on true
-    emit_bytes(compiler->parser, 2, CLOX_OP_POP, 1);
+    emit_bytes(2, CLOX_OP_POP, 1);
     
-    statement(compiler);
-    int else_offset = emit_jump(compiler->parser, CLOX_OP_JUMP);
-    patch_jump(compiler->parser, if_offset);
+    statement();
+    int else_offset = emit_jump(CLOX_OP_JUMP);
+    patch_jump(if_offset);
     // pop condition expression on false
-    emit_bytes(compiler->parser, 2, CLOX_OP_POP, 1);
+    emit_bytes(2, CLOX_OP_POP, 1);
     
-    if (match(compiler->parser, 1, CLOX_TOKEN_ELSE)) statement(compiler);
+    if (match(1, CLOX_TOKEN_ELSE)) statement();
 
-    patch_jump(compiler->parser, else_offset);
+    patch_jump(else_offset);
 }
 
-static void while_statement(Compiler *compiler) {
-    consume(CLOX_TOKEN_LEFT_PAREN, "Expect '(' after 'while'.", compiler->parser);
-    int start = compiler->parser->chunk->count;
-    expression(compiler);
-    consume(CLOX_TOKEN_RIGHT_PAREN, "Expect ')' after condition.", compiler->parser);
-    int end_while = emit_jump(compiler->parser, CLOX_OP_JUMP_IF_FALSE);
+static void while_statement() {
+    consume(CLOX_TOKEN_LEFT_PAREN, "Expect '(' after 'while'.");
+    int start = current_chunk()->count;
+    expression();
+    consume(CLOX_TOKEN_RIGHT_PAREN, "Expect ')' after condition.");
+    int end_while = emit_jump(CLOX_OP_JUMP_IF_FALSE);
     // pop condition expression on true
-    emit_bytes(compiler->parser, 2, CLOX_OP_POP, 1);
-    statement(compiler);
-    emit_loop(compiler->parser, start);
-    patch_jump(compiler->parser, end_while);
+    emit_bytes(2, CLOX_OP_POP, 1);
+    statement();
+    emit_loop(start);
+    patch_jump(end_while);
     // pop condition expression on false
-    emit_bytes(compiler->parser, 2, CLOX_OP_POP, 1);
+    emit_bytes(2, CLOX_OP_POP, 1);
 }
 
-static void for_statement(Compiler *compiler) {
+static void for_statement() {
     // desugar 'for' into 'while', add a scope for initializer
-    begin_scope(compiler->resolver);
-    consume(CLOX_TOKEN_LEFT_PAREN, "Expect '(' after 'for'.", compiler->parser);
+    begin_scope();
+    consume(CLOX_TOKEN_LEFT_PAREN, "Expect '(' after 'for'.");
     
     // initializer
-    if (!match(compiler->parser, 1, CLOX_TOKEN_SEMICOLON)) {
+    if (!match(1, CLOX_TOKEN_SEMICOLON)) {
         // variable declaration or expression (use statement to pop temporary value and consume ';')
-        if (match(compiler->parser, 1, CLOX_TOKEN_VAR)) var_declaration(compiler);
-        else expression_statement(compiler);
+        if (match(1, CLOX_TOKEN_VAR)) var_declaration();
+        else expression_statement();
     }
 
     // condition
-    int start = compiler->parser->chunk->count;
+    int start = current_chunk()->count;
     int end_for = -1;
-    if (!match(compiler->parser, 1, CLOX_TOKEN_SEMICOLON)) {
-        expression(compiler);
-        consume(CLOX_TOKEN_SEMICOLON, "Expect ';' after loop condition.", compiler->parser);
-        end_for = emit_jump(compiler->parser, CLOX_OP_JUMP_IF_FALSE);
+    if (!match(1, CLOX_TOKEN_SEMICOLON)) {
+        expression();
+        consume(CLOX_TOKEN_SEMICOLON, "Expect ';' after loop condition.");
+        end_for = emit_jump(CLOX_OP_JUMP_IF_FALSE);
         // pop condition expression on true
-        emit_bytes(compiler->parser, 2, CLOX_OP_POP, 1);
+        emit_bytes(2, CLOX_OP_POP, 1);
     }
 
     // increment
-    if (!match(compiler->parser, 1, CLOX_TOKEN_RIGHT_PAREN)) {
-        int body = emit_jump(compiler->parser, CLOX_OP_JUMP);
-        int increment = compiler->parser->chunk->count;
-        expression(compiler);
-        consume(CLOX_TOKEN_RIGHT_PAREN, "Expect ')' after for clauses.", compiler->parser);
-        emit_bytes(compiler->parser, 2, CLOX_OP_POP, 1);
-        emit_loop(compiler->parser, start);
+    if (!match(1, CLOX_TOKEN_RIGHT_PAREN)) {
+        int body = emit_jump(CLOX_OP_JUMP);
+        int increment = current_chunk()->count;
+        expression();
+        consume(CLOX_TOKEN_RIGHT_PAREN, "Expect ')' after for clauses.");
+        emit_bytes(2, CLOX_OP_POP, 1);
+        emit_loop(start);
         start = increment;
-        patch_jump(compiler->parser, body);
+        patch_jump(body);
     }
 
     // body
-    statement(compiler);
-    emit_loop(compiler->parser, start);
+    statement();
+    emit_loop(start);
     
     if (end_for != -1) {
-        patch_jump(compiler->parser, end_for);
+        patch_jump(end_for);
         // pop condition expression on false
-        emit_bytes(compiler->parser, 2, CLOX_OP_POP, 1);
+        emit_bytes(2, CLOX_OP_POP, 1);
     }
 
-    end_scope(compiler);
+    end_scope();
 }
 
-static void expression_statement(Compiler *compiler) {
-    expression(compiler);
-    consume(CLOX_TOKEN_SEMICOLON, "Expect ';' after expression.", compiler->parser);
-    emit_bytes(compiler->parser, 2, CLOX_OP_POP, 1);
+static void return_statement() {
+    if (current_resolver->type == TYPE_SCRIPT) error_report(parser->previous, "Can't return from top-level code.");
+    else {
+        if (match(CLOX_TOKEN_SEMICOLON)) emit_nil_return();
+        else {
+            expression();        
+            consume(CLOX_TOKEN_SEMICOLON, "Expect ';' after return statement");
+            emit_return();
+        }
+    }
 }
 
-static void expression(Compiler *compiler) {
-    parse_precedence(PREC_ASSIGNMENT, compiler);
+static void expression_statement() {
+    expression();
+    consume(CLOX_TOKEN_SEMICOLON, "Expect ';' after expression.");
+    emit_bytes(2, CLOX_OP_POP, 1);
 }
 
-static void parse_precedence(Precedence precedence, Compiler *compiler) {
-    advance(compiler->parser);
-    ParserRule *rule = &rules[compiler->parser->previous->type];
+static void expression() {
+    parse_precedence(PREC_ASSIGNMENT);
+}
+
+static void parse_precedence(Precedence precedence) {
+    advance();
+    ParserRule *rule = &rules[parser->previous->type];
     parser_func prefix = rule->prefix;
     if (prefix == NULL) {
-        error_report(compiler->parser->previous, "Expect expression.", compiler->parser);
+        error_report(parser->previous, "Expect expression.");
         return;
     }
     bool assign = precedence <= PREC_ASSIGNMENT; 
-    prefix(compiler, assign);
-    while (precedence <= rules[compiler->parser->current->type].precedence) {
-        advance(compiler->parser);
-        parser_func infix = rules[compiler->parser->previous->type].infix;
-        infix(compiler, assign);
+    prefix(assign);
+    while (precedence <= rules[parser->current->type].precedence) {
+        advance();
+        parser_func infix = rules[parser->previous->type].infix;
+        infix(assign);
     }
-    if (assign && match(compiler->parser, 1, CLOX_TOKEN_EQUAL)) error_report(compiler->parser->previous, "Invalid assignment target.", compiler->parser);
+    if (assign && match(1, CLOX_TOKEN_EQUAL)) error_report(parser->previous, "Invalid assignment target.");
 }
 
-static void variable(Compiler *compiler, bool assign) {
+static void variable(bool assign) {
 #define PARSE_VARIABLE(operation, idx, scope) do {\
-        if ((idx) > UINT8_MAX) emit_bytes(compiler->parser, 3, CLOX_OP_##operation##_##scope##_16, (idx) & 0xff, (idx) >> 8);\
-        else emit_bytes(compiler->parser, 2, CLOX_OP_##operation##_##scope, (idx));\
+        if ((idx) > UINT8_MAX) emit_bytes(3, CLOX_OP_##operation##_##scope##_16, (idx) & 0xff, (idx) >> 8);\
+        else emit_bytes(2, CLOX_OP_##operation##_##scope, (idx));\
     } while(0);
     
-    int local_idx = resolve_local(compiler, compiler->parser->previous);
+    int local_idx = resolve_local(parser->previous);
     int global_idx = 0;
-    if (local_idx == -1) global_idx = make_constant(OBJ_VALUE(new_string(compiler->parser->previous->lexeme, compiler->parser->previous->length)), compiler->parser); 
-    if (assign && match(compiler->parser, 1, CLOX_TOKEN_EQUAL)) {
-        expression(compiler);
+    if (local_idx == -1) global_idx = make_constant(OBJ_VALUE(new_string(parser->previous->lexeme, parser->previous->length))); 
+    if (assign && match(1, CLOX_TOKEN_EQUAL)) {
+        expression();
         // set variables
         if (local_idx != -1) {
             // local set
@@ -447,37 +592,56 @@ static void variable(Compiler *compiler, bool assign) {
 #undef PARSE_VARIABLE
 }
 
-static int resolve_local(Compiler *compiler, Token* token) {
-    for (int i = compiler->resolver->local_count - 1; i >= 0; i--) {
-        Local *local = &compiler->resolver->locals[i];
+static int resolve_local(Token* token) {
+    for (int i = current_resolver->local_count - 1; i >= 0; i--) {
+        Local *local = &current_resolver->locals[i];
         if (token_equal(token, &local->name)) {
-            if (local->depth == -1) error_report(token, "Can't read local variable in its own initializer.", compiler->parser);
+            if (local->depth == -1) error_report(token, "Can't read local variable in its own initializer.");
             return i;
         }
     }
     return -1;
 }
 
-static void grouping(Compiler *compiler, bool assign) {
-    expression(compiler);
-    consume(CLOX_TOKEN_RIGHT_PAREN, "Expect ')' after expression.", compiler->parser);
+static void grouping(bool assign) {
+    expression();
+    consume(CLOX_TOKEN_RIGHT_PAREN, "Expect ')' after expression.");
 }
 
-static void number(Compiler *compiler, bool assign) {
-    Value value = NUMBER_VALUE(strtod(compiler->parser->previous->lexeme, NULL));
-    emit_constant(value, compiler->parser);
+static void call(bool assign) {
+    uint8_t arg_cnt = argument_list();
+    emit_bytes(2, CLOX_OP_CALL, arg_cnt); 
 }
 
-static void unary(Compiler *compiler, bool assign) {
-    TokenType type = compiler->parser->previous->type;
+static uint8_t argument_list() {
+    int arg_cnt = 0;
+    if (!check(CLOX_TOKEN_RIGHT_PAREN)) {
+        do {
+            // add an argument into stack
+            expression();
+            if (arg_cnt == 256) error_report(parser->current, "Can't have more than 255 arguments.");
+            arg_cnt++;
+        } while (match(1, CLOX_TOKEN_COMMA));
+    }
+    consume(CLOX_TOKEN_RIGHT_PAREN, "Expect ')' after arguments.");
+    return (uint8_t)arg_cnt;
+}
+
+static void number(bool assign) {
+    Value value = NUMBER_VALUE(strtod(parser->previous->lexeme, NULL));
+    emit_constant(value);
+}
+
+static void unary(bool assign) {
+    TokenType type = parser->previous->type;
     // right associate unary => precedence
-    parse_precedence(PREC_UNARY, compiler);
+    parse_precedence(PREC_UNARY);
     switch (type) {
         case CLOX_TOKEN_MINUS:
-            emit_byte(CLOX_OP_NEGATE, compiler->parser);
+            emit_byte(CLOX_OP_NEGATE);
             break;
         case CLOX_TOKEN_BANG:
-            emit_byte(CLOX_OP_NOT, compiler->parser);
+            emit_byte(CLOX_OP_NOT);
             break;
         default:
             // never reach here
@@ -485,47 +649,47 @@ static void unary(Compiler *compiler, bool assign) {
     }
 }
 
-static void binary(Compiler *compiler, bool assign) {
-    TokenType type = compiler->parser->previous->type;
+static void binary(bool assign) {
+    TokenType type = parser->previous->type;
     ParserRule *rule = &rules[type];
     // left associate binary => precedence + 1 
-    parse_precedence((Precedence)(rule->precedence + 1), compiler);
+    parse_precedence((Precedence)(rule->precedence + 1));
     switch (type) {
         case CLOX_TOKEN_PLUS:
-            emit_byte(CLOX_OP_ADD, compiler->parser);
+            emit_byte(CLOX_OP_ADD);
             break;
         case CLOX_TOKEN_MINUS:
-            emit_byte(CLOX_OP_SUBTRACT, compiler->parser);
+            emit_byte(CLOX_OP_SUBTRACT);
             break;
         case CLOX_TOKEN_STAR:
-            emit_byte(CLOX_OP_MULTIPLY, compiler->parser);
+            emit_byte(CLOX_OP_MULTIPLY);
             break;
         case CLOX_TOKEN_SLASH:
-            emit_byte(CLOX_OP_DIVIDE, compiler->parser);
+            emit_byte(CLOX_OP_DIVIDE);
             break;
         case CLOX_TOKEN_PERCENT:
-            emit_byte(CLOX_OP_MODULO, compiler->parser);
+            emit_byte(CLOX_OP_MODULO);
             break;
         case CLOX_TOKEN_STAR_STAR:
-            emit_byte(CLOX_OP_POWER, compiler->parser);
+            emit_byte(CLOX_OP_POWER);
             break;
         case CLOX_TOKEN_EQUAL_EQUAL:
-            emit_byte(CLOX_OP_EQUAL, compiler->parser);
+            emit_byte(CLOX_OP_EQUAL);
             break;
         case CLOX_TOKEN_BANG_EQUAL:
-            emit_bytes(compiler->parser, 2, CLOX_OP_EQUAL, CLOX_OP_NOT);
+            emit_bytes(2, CLOX_OP_EQUAL, CLOX_OP_NOT);
             break;
         case CLOX_TOKEN_GREATER:
-            emit_byte(CLOX_OP_GREATER, compiler->parser);
+            emit_byte(CLOX_OP_GREATER);
             break;
         case CLOX_TOKEN_GREATER_EQUAL:
-            emit_bytes(compiler->parser, 2, CLOX_OP_LESS, CLOX_OP_NOT);
+            emit_bytes(2, CLOX_OP_LESS, CLOX_OP_NOT);
             break;
         case CLOX_TOKEN_LESS:
-            emit_byte(CLOX_OP_LESS, compiler->parser);
+            emit_byte(CLOX_OP_LESS);
             break;
         case CLOX_TOKEN_LESS_EQUAL:
-            emit_bytes(compiler->parser, 2, CLOX_OP_GREATER, CLOX_OP_NOT);
+            emit_bytes(2, CLOX_OP_GREATER, CLOX_OP_NOT);
             break;
         default:
             // never reach
@@ -533,17 +697,17 @@ static void binary(Compiler *compiler, bool assign) {
     }
 }
 
-static void literal(Compiler *compiler, bool assign) {
-    TokenType type = compiler->parser->previous->type;
+static void literal(bool assign) {
+    TokenType type = parser->previous->type;
     switch (type) {
         case CLOX_TOKEN_NIL:
-            emit_byte(CLOX_OP_NIL, compiler->parser);
+            emit_byte(CLOX_OP_NIL);
             break;
         case CLOX_TOKEN_TRUE:
-            emit_byte(CLOX_OP_TRUE, compiler->parser);
+            emit_byte(CLOX_OP_TRUE);
             break;
         case CLOX_TOKEN_FALSE:
-            emit_byte(CLOX_OP_FALSE, compiler->parser);
+            emit_byte(CLOX_OP_FALSE);
             break;
         default:
             // never reach
@@ -551,77 +715,82 @@ static void literal(Compiler *compiler, bool assign) {
     }
 }
 
-static void string(Compiler *compiler, bool assign) {
+static void string(bool assign) {
     // remove double quote
-    int length = compiler->parser->previous->length - 2;
-    Value value = OBJ_VALUE(new_string(compiler->parser->previous->lexeme + 1, length));
-    emit_constant(value, compiler->parser);
+    int length = parser->previous->length - 2;
+    Value value = OBJ_VALUE(new_string(parser->previous->lexeme + 1, length));
+    emit_constant(value);
 }
 
-static void and(Compiler *compiler, bool assign) {
-    int if_jump = emit_jump(compiler->parser, CLOX_OP_JUMP_IF_FALSE);
+static void and(bool assign) {
+    int if_jump = emit_jump(CLOX_OP_JUMP_IF_FALSE);
     // pop on left operand is true
-    emit_bytes(compiler->parser, 2, CLOX_OP_POP, 1);
-    parse_precedence(PREC_AND, compiler);
-    patch_jump(compiler->parser, if_jump);
+    emit_bytes(2, CLOX_OP_POP, 1);
+    parse_precedence(PREC_AND);
+    patch_jump(if_jump);
 }
 
-static void or(Compiler *compiler, bool assign) {
-    int else_jump = emit_jump(compiler->parser, CLOX_OP_JUMP_IF_FALSE);
-    int end_jump = emit_jump(compiler->parser, CLOX_OP_JUMP);
-    patch_jump(compiler->parser, else_jump);
+static void or(bool assign) {
+    int else_jump = emit_jump(CLOX_OP_JUMP_IF_FALSE);
+    int end_jump = emit_jump(CLOX_OP_JUMP);
+    patch_jump(else_jump);
     // pop on left operand is false
-    emit_bytes(compiler->parser, 2, CLOX_OP_POP, 1);
-    parse_precedence(PREC_OR, compiler);
-    patch_jump(compiler->parser, end_jump);
+    emit_bytes(2, CLOX_OP_POP, 1);
+    parse_precedence(PREC_OR);
+    patch_jump(end_jump);
 }
 
-static void xor(Compiler *compiler, bool assign) {
-    parse_precedence(PREC_XOR, compiler);
-    int if_jump = emit_jump(compiler->parser, CLOX_OP_JUMP_IF_FALSE);
+static void xor(bool assign) {
+    parse_precedence(PREC_XOR);
+    int if_jump = emit_jump(CLOX_OP_JUMP_IF_FALSE);
     // pop on right operand is true
-    emit_bytes(compiler->parser, 2, CLOX_OP_POP, 1);
-    emit_byte(CLOX_OP_NOT, compiler->parser);
-    int pop_jump = emit_jump(compiler->parser, CLOX_OP_JUMP);
-    patch_jump(compiler->parser, if_jump);
+    emit_bytes(2, CLOX_OP_POP, 1);
+    emit_byte(CLOX_OP_NOT);
+    int pop_jump = emit_jump(CLOX_OP_JUMP);
+    patch_jump(if_jump);
     // pop on right operand is false
-    emit_bytes(compiler->parser, 2, CLOX_OP_POP, 1);
-    patch_jump(compiler->parser, pop_jump);
+    emit_bytes(2, CLOX_OP_POP, 1);
+    patch_jump(pop_jump);
 }
 
-static void emit_byte(uint8_t byte, Parser *parser) {
-    write_chunk(parser->chunk, byte, parser->previous->location.line, parser->previous->location.column);
+static void emit_byte(uint8_t byte) {
+    write_chunk(current_chunk(), byte, parser->previous->location.line, parser->previous->location.column);
 }
 
-static void emit_bytes(Parser *parser, int cnt, ...) {
+static void emit_bytes(int cnt, ...) {
     va_list args;
     va_start(args, cnt);
-    for (int i = 0; i < cnt; i++) emit_byte(va_arg(args, int), parser);
+    for (int i = 0; i < cnt; i++) emit_byte(va_arg(args, int));
     va_end(args);
 }
 
-static void emit_return(Parser *parser) {
-    emit_byte(CLOX_OP_RETURN, parser);
+static void emit_nil_return() {
+    emit_byte(CLOX_OP_NIL);
+    emit_return();
 }
 
-static void emit_constant(Value value, Parser *parser) {
-    uint16_t idx = make_constant(value, parser);
-    if (idx > UINT8_MAX) emit_bytes(parser, 3, CLOX_OP_CONSTANT_16, idx & 0xff, idx >> 8);
-    else emit_bytes(parser, 2, CLOX_OP_CONSTANT, idx);
+static void emit_return() {
+    emit_byte(CLOX_OP_RETURN);
+}
+
+static void emit_constant(Value value) {
+    uint16_t idx = make_constant(value);
+    if (idx > UINT8_MAX) emit_bytes(3, CLOX_OP_CONSTANT_16, idx & 0xff, idx >> 8);
+    else emit_bytes(2, CLOX_OP_CONSTANT, idx);
 }
 
 /** 
  * max size of constant pool is 65536 (0 ~ 65535)
  */
-static uint16_t make_constant(Value value, Parser *parser) {
-    int idx = append_constant(parser->chunk, value);
-    if (idx > UINT16_MAX) error_report(parser->previous, "Too many constants in one chunk.", parser);
+static uint16_t make_constant(Value value) {
+    int idx = append_constant(current_chunk(), value);
+    if (idx > UINT16_MAX) error_report(parser->previous, "Too many constants in one chunk.");
     return (uint16_t)idx;
 }
 
-static int emit_jump(Parser *parser, uint8_t instruction) {
-    emit_bytes(parser, 3, instruction, 0xff, 0xff);
-    return parser->chunk->count - 2;
+static int emit_jump(uint8_t instruction) {
+    emit_bytes(3, instruction, 0xff, 0xff);
+    return current_chunk()->count - 2;
 }
 
 // patch distance from current to @param: offset to @param:offset
@@ -631,19 +800,27 @@ static int emit_jump(Parser *parser, uint8_t instruction) {
 //     ...         | ---- 
 //     ...         |    | -> @return: jump (caled by current function)
 // -> current      | ----
-static void patch_jump(Parser *parser, int offset) {
-    int jump = parser->chunk->count - offset - 2; 
-    if (jump > UINT16_MAX) error_report(parser->previous, "Too much code to jump over.", parser);
-    parser->chunk->code[offset] = jump & 0xff;
-    parser->chunk->code[offset + 1] = (jump >> 8) & 0xff;
+static void patch_jump(int offset) {
+    Chunk *chunk = current_chunk();
+    int jump = chunk->count - offset - 2;
+    if (jump > UINT16_MAX) error_report(parser->previous, "Too much code to jump over.");
+    chunk->code[offset] = jump & 0xff;
+    chunk->code[offset + 1] = (jump >> 8) & 0xff;
 }
 
-static void emit_loop(Parser *parser, int start) {
-    int jump = parser->chunk->count - start + 3;
-    emit_bytes(parser, 3, CLOX_OP_LOOP, jump & 0xff, (jump >> 8) & 0xff);
+// jump to @param: start
+// -> start                  | ----
+//     ...                   |    |
+//     ...                   |    | -> @return: jump (caled by current function)
+// -> current (CLOX_OP_LOOP) |    | 
+// -> low bits               |    |
+// -> high bits              | ----
+static void emit_loop(int start) {
+    int jump = current_chunk()->count - start + 3;
+    emit_bytes(3, CLOX_OP_LOOP, jump & 0xff, (jump >> 8) & 0xff);
 }
 
-static void error_report(Token *token, const char *message, Parser *parser) {
+static void error_report(Token *token, const char *message) {
     if (parser->panic_mode) return;
     parser->panic_mode = true;
     fprintf(stderr, "[line %2d column %2d Error]", token->location.line, token->location.column);
@@ -662,10 +839,10 @@ static void error_report(Token *token, const char *message, Parser *parser) {
     parser->had_error = true;
 }
 
-static void synchronize(Parser *parser) {
+static void synchronize() {
     parser->panic_mode = false;
 
-    while (!check(parser, CLOX_TOKEN_EOF)) {
+    while (!check(CLOX_TOKEN_EOF)) {
         if (parser->previous->type == CLOX_TOKEN_SEMICOLON) return;
         switch (parser->current->type) {
             case CLOX_TOKEN_CLASS:
@@ -678,6 +855,6 @@ static void synchronize(Parser *parser) {
             case CLOX_TOKEN_RETURN: return;
             default: break;
         }
-        advance(parser);
+        advance();
     }
 }

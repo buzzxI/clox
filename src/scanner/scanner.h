@@ -64,7 +64,7 @@ typedef struct {
     Trie *keywords;
 } Scanner;
 
-void init_scanner(const char *source, Scanner *scanner);
+Scanner* init_scanner(const char *source);
 void free_scanner(Scanner *scanner);
 Token* scan_token(Scanner *scanner);
 
