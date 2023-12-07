@@ -17,7 +17,8 @@
 static void reset_stack();
 static InterpreterResult run();
 static bool function_call(Value function, uint8_t arg_cnt);
-static bool invoke(FunctionObj *function, uint8_t arg_cnt);
+static bool invoke(ClosureObj *closure, uint8_t arg_cnt);
+static void close_upvalue(Value *slot);
 static void* read_bytes(int num);
 static void runtime_error(char *format, ...);
 static void push(Value value);
@@ -46,8 +47,9 @@ InterpreterResult interpret(const char *source) {
     init_vm();
     FunctionObj *function = compile(source);
     if (function == NULL) return INTERPRET_COMPLIE_ERROR;
-    push(OBJ_VALUE(function));
-    invoke(function, 0);
+    ClosureObj *closure = new_closure(function);
+    push(OBJ_VALUE(closure));
+    invoke(closure, 0);
     InterpreterResult rst = run();
     free_vm();
     return rst; 
@@ -56,13 +58,14 @@ InterpreterResult interpret(const char *source) {
 static void reset_stack() {
     vm.sp = vm.stack;
     vm.frame_cnt = 0;
+    vm.upvalues.next = NULL;
 }
 
 static InterpreterResult run() {
     CallFrame *frame = &vm.frames[vm.frame_cnt - 1];
 #define PEEK_BYTE()         (*frame->pc)
-#define READ_CONSTANT()     (frame->function->chunk.constant.values[(*(uint8_t*)(read_bytes(1)))])
-#define READ_CONSTANT_16()  (frame->function->chunk.constant.values[(*(uint16_t*)(read_bytes(2)))])
+#define READ_CONSTANT()     (frame->closure->function->chunk.constant.values[(*(uint8_t*)(read_bytes(1)))])
+#define READ_CONSTANT_16()  (frame->closure->function->chunk.constant.values[(*(uint16_t*)(read_bytes(2)))])
 #define BINARY_OP(val_type, op) do {\
         Value b = pop();\
         Value a = pop();\
@@ -80,7 +83,7 @@ static InterpreterResult run() {
             printf(" ");
         } 
         printf("%%sp]\n");
-        disassemble_instruction(&frame->function->chunk, (int)(frame->pc - frame->function->chunk.code));
+        disassemble_instruction(&frame->closure->function->chunk, (int)(frame->pc - frame->closure->function->chunk.code));
 #endif // CLOX_DEBUG_TRACE_EXECUTION
         
         uint8_t *instruction = read_bytes(1);
@@ -92,6 +95,7 @@ static InterpreterResult run() {
             case CLOX_OP_RETURN: {
                 // return value
                 Value rst = pop();
+                close_upvalue(frame->slots);
                 vm.frame_cnt--;
                 if (vm.frame_cnt == 0) {
                     // pop the entry function
@@ -199,8 +203,7 @@ static InterpreterResult run() {
                 printf("\n");
                 break;
             case CLOX_OP_POP:
-                uint8_t *num = read_bytes(1);
-                for (int i = 0; i < *num; i++) pop();
+                pop();
                 break;
             case CLOX_OP_DEFINE_GLOBAL:{
                 StringObj *identifier = AS_STRING(READ_CONSTANT());
@@ -293,6 +296,55 @@ static InterpreterResult run() {
                 frame = &vm.frames[vm.frame_cnt - 1];
                 break;
             }
+            case CLOX_OP_CLOSURE: {
+                FunctionObj *function = AS_FUNCTION(READ_CONSTANT()); 
+                ClosureObj *closure = new_closure(function);
+                for (int i = 0; i < closure->upvalue_count; i++) {
+                    uint8_t *is_local = read_bytes(1);
+                    uint16_t *idx = read_bytes(2);
+                    if (*is_local) closure->upvalues[i] = new_upvalue(frame->slots + *idx);
+                    else closure->upvalues[i] = frame->closure->upvalues[*idx];
+                }   
+                push(OBJ_VALUE(closure));
+                break;
+            }
+            case CLOX_OP_CLOSURE_16: {
+                FunctionObj *function = AS_FUNCTION(READ_CONSTANT_16());
+                ClosureObj *closure = new_closure(function);
+                for (int i = 0; i < closure->upvalue_count; i++) {
+                    uint8_t *is_local = read_bytes(1);
+                    uint16_t *idx = read_bytes(2);
+                    if (*is_local) closure->upvalues[i] = new_upvalue(frame->slots + *idx);
+                    else closure->upvalues[i] = frame->closure->upvalues[*idx];
+                }
+                push(OBJ_VALUE(closure));
+                break;
+            }
+            case CLOX_OP_GET_UPVALUE: {
+                uint8_t *idx = read_bytes(1);
+                push(*frame->closure->upvalues[*idx]->location);
+                break;
+            }
+            case CLOX_OP_GET_UPVALUE_16: {
+                uint16_t *idx = read_bytes(2);
+                push(*frame->closure->upvalues[*idx]->location);
+                break;
+            }
+            case CLOX_OP_SET_UPVALUE: {
+                uint8_t *idx = read_bytes(1);
+                *frame->closure->upvalues[*idx]->location = peek(0);
+                break;
+            }
+            case CLOX_OP_SET_UPVALUE_16: {
+                uint16_t *idx = read_bytes(2);
+                *frame->closure->upvalues[*idx]->location = peek(0);
+                break;
+            }
+            case CLOX_OP_CLOSE_UPVALUE: {
+                close_upvalue(vm.sp - 1);
+                pop();
+                break;
+            }
             default: break;
         }
     }
@@ -309,8 +361,6 @@ static bool function_call(Value function, uint8_t arg_cnt) {
         return false;
     }
     switch(OBJ_TYPE(function)) {
-        case OBJ_FUNCTION:
-            return invoke(AS_FUNCTION(function), arg_cnt);
         case OBJ_NATIVE: {
             NativeObj *native = AS_NATIVE(function);
             Value rst = native->native(arg_cnt, vm.sp - arg_cnt);
@@ -319,33 +369,47 @@ static bool function_call(Value function, uint8_t arg_cnt) {
             push(rst);
             return true;
         }
+        case OBJ_CLOSURE: return invoke(AS_CLOSURE(function), arg_cnt);
         default: break;
     }
     return false;
 }
 
-static bool invoke(FunctionObj *function, uint8_t arg_cnt) {
+// all function in clox will be wrapped as closure at runtime
+static bool invoke(ClosureObj *closure, uint8_t arg_cnt) {
     if (vm.frame_cnt == FRAMES_MAX) {
         runtime_error("stack overflow.");
         return false;
     }
-    if (function->arity != arg_cnt) {
-        runtime_error("expected %d arguments but got %d.", function->arity, arg_cnt);
+    if (closure->function->arity != arg_cnt) {
+        runtime_error("expected %d arguments but got %d.", closure->function->arity, arg_cnt);
         return false;
     }
     CallFrame *frame = &vm.frames[vm.frame_cnt++];
-    frame->function = function;
-    frame->pc = function->chunk.code;
+    frame->closure = closure;
+    frame->pc = closure->function->chunk.code;
     frame->slots = vm.sp - arg_cnt - 1;
     return true;
 }
 
+static void close_upvalue(Value *slot) {
+    UpvalueObj *head = &vm.upvalues;
+    UpvalueObj *cur = head;
+    while (cur->next != NULL && cur->next->location >= slot) {
+        UpvalueObj *next = cur->next;
+        next->close = *next->location;
+        next->location = &next->close;
+        cur->next = next->next;
+    }
+}
+
 static void* read_bytes(int num) {
     CallFrame *frame = &vm.frames[vm.frame_cnt - 1];
+    Chunk *source = &frame->closure->function->chunk;
     void *rst = frame->pc;
     frame->pc += num;
-    if (frame->pc - frame->function->chunk.code > frame->function->chunk.count) {
-        frame->pc = frame->function->chunk.code + frame->function->chunk.count - 1;
+    if (frame->pc - source->code > source->count) {
+        frame->pc = source->code + source->count - 1;
         rst = NULL;
     } 
     return rst;
@@ -360,7 +424,7 @@ static void runtime_error(char *format, ...) {
 
     for (int i = vm.frame_cnt - 1; i >= 0; i--) {
         CallFrame *frame = &vm.frames[i];
-        FunctionObj *function = frame->function;
+        FunctionObj *function = frame->closure->function;
         // vm will increse pc after read an instruction
         int offset = frame->pc - function->chunk.code - 1;
         int line = function->chunk.line_info[offset];
@@ -391,7 +455,6 @@ static void define_native(const char *name, native_func native) {
     StringObj *native_name = new_string(name, strlen(name));
     table_put(native_name, OBJ_VALUE(new_native(native, native_name)), &vm.globals);
 }
-
 
 static Value native_clock(int argc, Value *args) {
     return NUMBER_VALUE((double)clock() / CLOCKS_PER_SEC);

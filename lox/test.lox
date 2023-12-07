@@ -7,16 +7,18 @@
 //     print a;
 // }
 
-var i = 10;
-for (; i >= 0;) {
-    print i;
-    i = i - 1;
-}
+// var i = 10;
+// for (; i >= 0;) {
+//     print i;
+//     i = i - 1;
+// }
 
 // fun test() {
-//     test();
+//     // test();
 //     print "fun";
+//     return -1;
 // }
+// test();
 // print test;
 // test();
 
@@ -29,20 +31,101 @@ for (; i >= 0;) {
 // a();
 
 // Returns the nth Fibonacci number
-// fun fibonacci(n) {
-//   if (n == 0) {
-//     return 0;
-//   } else if (n == 1) {
-//     return 1;
-//   } else {
-//     return fibonacci(n - 1) + fibonacci(n - 2);
+// {
+
+// }
+// {
+//     fun fibonacci(n) {
+//         if (n == 0) {
+//           return 0;
+//         } else if (n == 1) {
+//           return 1;
+//         } else {
+//           return fibonacci(n - 1) + fibonacci(n - 2);
+//         }
+//     }
+//     var begin = clock();
+//     // print fibonacci(35);
+//     var end = clock();
+//     print end - begin;
+//     begin = clock();
+//     print fibonacci(15);
+//     end = clock();
+//     print end - begin;
+// }
+
+fun fibonacci(n) {
+    if (n == 0) {
+      return 0;
+    } else if (n == 1) {
+      return 1;
+    } else {
+      return fibonacci(n - 1) + fibonacci(n - 2);
+    }
+}
+var begin = clock();
+print fibonacci(15);
+var end = clock();
+print end - begin;
+
+
+// fun outer() {
+//   var a = 1;
+//   var b = 2;
+//   fun middle() {
+//     var c = 3;
+//     var d = 4;
+//     fun inner() {
+//       print a + c + b + d;
+//     }
 //   }
 // }
-// var begin = clock();
-// print fibonacci(35);
-// var end = clock();
-// print end - begin;
-// begin = clock();
-// print fibonacci(15);
-// end = clock();
-// print end - begin;
+
+// outer();
+
+// var globalSet;
+// var globalGet;
+
+// fun main() {
+//   var a = "initial";
+
+//   fun set() { a = "updated"; }
+//   fun get() { print a; }
+
+//   globalSet = set;
+//   globalGet = get;
+// }
+
+// main();
+// globalSet();
+// globalGet();
+
+// var get;
+// var set;
+
+// fun outer() {
+//     var x = "abc";
+
+//     fun setVar() {
+//         x = "def";
+//     }
+
+//     fun getVar() {
+//         print x;
+//     }
+    
+//     get = getVar;
+//     set = setVar;
+// }
+
+// fun other() {
+//     var a = "123";
+//     var b = "456";
+//     var c = "def";
+//     print "123"; 
+// }
+
+// outer();
+
+// set();
+// get();

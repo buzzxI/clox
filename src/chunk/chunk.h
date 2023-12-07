@@ -38,6 +38,13 @@ typedef enum {
     CLOX_OP_JUMP,
     CLOX_OP_LOOP,
     CLOX_OP_CALL,
+    CLOX_OP_CLOSURE,
+    CLOX_OP_CLOSURE_16,
+    CLOX_OP_GET_UPVALUE,
+    CLOX_OP_GET_UPVALUE_16,
+    CLOX_OP_SET_UPVALUE,
+    CLOX_OP_SET_UPVALUE_16,
+    CLOX_OP_CLOSE_UPVALUE,
 } OpCode;
 
 typedef struct {

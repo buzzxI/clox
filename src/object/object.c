@@ -26,7 +26,15 @@ void print_obj(Value value) {
             else printf("<clox function %s>", function->name->str);
             break;
         case OBJ_NATIVE:
-            printf("<native function %s>", AS_NATIVE(value)->name->str);
+            printf("<clox native %s>", AS_NATIVE(value)->name->str);
+            break;
+        case OBJ_CLOSURE:
+            ClosureObj *closure = AS_CLOSURE(value);
+            if (closure->function->name == NULL) printf("<clox closure script>");
+            else printf("<clox closure %s>", closure->function->name->str);
+            break;
+        case OBJ_UPVALUE:
+            printf("<upvalue>");
             break;
     }
 } 
@@ -38,6 +46,8 @@ bool objs_equal(Value a, Value b) {
         case OBJ_INSTANCE:  return false;
         case OBJ_FUNCTION:  return AS_FUNCTION(a) == AS_FUNCTION(b);
         case OBJ_NATIVE:    return AS_NATIVE(a) == AS_NATIVE(b);
+        case OBJ_CLOSURE:   return AS_CLOSURE(a) == AS_CLOSURE(b);
+        case OBJ_UPVALUE:   return AS_CLOSURE(a) == AS_CLOSURE(b);
     }
     return false;
 }
@@ -65,6 +75,7 @@ FunctionObj* new_function() {
     function->arity = 0;
     function->name = NULL;
     init_chunk(&function->chunk);
+    function->upvalue_count = 0;
     return function;
 }
 
@@ -73,6 +84,29 @@ NativeObj* new_native(native_func func, StringObj *name) {
     native->native = func;
     native->name = name;
     return native;
+}
+
+ClosureObj* new_closure(FunctionObj *function) {
+    ClosureObj *closure = (ClosureObj*)new_obj(OBJ_CLOSURE, sizeof(ClosureObj));
+    closure->function = function;
+    closure->upvalue_count = function->upvalue_count;
+    closure->upvalues = ALLOCATE(UpvalueObj*, closure->upvalue_count);
+    for (int i = 0; i < closure->upvalue_count; i++) closure->upvalues[i] = NULL;
+    return closure;
+}
+
+UpvalueObj* new_upvalue(Value *slot) {
+    UpvalueObj *head = &vm.upvalues;
+    UpvalueObj *cur = head;
+    while (cur->next != NULL && cur->next->location > slot) cur = cur->next;
+    if (cur->next != NULL && cur->next->location == slot) return cur->next;
+
+    UpvalueObj *upvalue = (UpvalueObj*)new_obj(OBJ_UPVALUE, sizeof(UpvalueObj));
+    upvalue->location = slot;
+    upvalue->close = NIL_VALUE;
+    upvalue->next = cur->next;
+    cur->next = upvalue;
+    return upvalue;
 }
 
 void free_objs() {
@@ -110,6 +144,14 @@ static void free_obj(Obj *obj) {
             break;
         case OBJ_NATIVE:
             FREE(NativeObj, obj);
+            break;
+        case OBJ_CLOSURE:
+            ClosureObj *closure = (ClosureObj*)obj;
+            FREE_ARRAY(UpvalueObj*, closure->upvalues, closure->upvalue_count);
+            FREE(ClosureObj, obj);
+            break;
+        case OBJ_UPVALUE:
+            FREE(UpvalueObj, obj);
             break;
         default:
             break;

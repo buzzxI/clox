@@ -45,14 +45,22 @@ typedef struct {
 typedef struct {
     Token name;
     int depth;
+    bool captured;
 } Local;
 
-typedef struct Resolver{
+typedef struct {
+    uint16_t idx;
+    bool is_local;
+} UpValue;
+
+typedef struct Resolver {
     struct Resolver *enclose;
 
     Local locals[UINT16_COUNT];
     int local_count;
     int scope_depth;
+
+    UpValue upvalues[UINT16_COUNT];
 
     FunctionObj *function;
     FunctionType type;
@@ -105,7 +113,9 @@ static void return_statement();
 static void expression_statement();
 static void expression();
 static void variable(bool assign);
-static int resolve_local(Token* token);
+static int resolve_local(Token *token, Resolver *resolver);
+static int resolve_upvalue(Token *token, Resolver *resolver);
+static int add_upvalue(int local, bool is_local, Resolver *resolver);
 static void grouping(bool assign);
 static void call(bool assign);
 static uint8_t argument_list();
@@ -224,6 +234,8 @@ static void init_resolver(FunctionType type) {
     local->depth = 0;
     local->name.lexeme = "";
     local->name.length = 0;
+    // slot 0 is reserved for implicit function (self) => not captured 
+    local->captured = false;
 
     resolver->function = new_function();
     if (type != TYPE_SCRIPT) {
@@ -237,17 +249,31 @@ static void init_resolver(FunctionType type) {
 }
 
 static FunctionObj* free_resolver() {
-    emit_return();
-    
+    emit_nil_return();
+
     FunctionObj *function = current_resolver->function;
 
     bool error = parser->had_error;
 #ifdef  CLOX_DEBUG_DISASSEMBLE 
-    if (error) disassemble_chunk(current_chunk(), function->name == NULL ? "clox script", function->name->str);
+    if (!error) disassemble_chunk(current_chunk(), function->name == NULL ? "clox script" : function->name->str);
 #endif  // CLOX_DEBUG_DISASSEMBLE
-    
+
     Resolver *resolver = current_resolver;
     current_resolver = current_resolver->enclose; 
+
+    // resolve upvalues
+    if (current_resolver != NULL) {
+        // emit closure instruction
+        uint16_t idx = make_constant(OBJ_VALUE(function));
+        if (idx > UINT8_MAX) emit_bytes(3, CLOX_OP_CLOSURE_16, idx & 0xff, idx >> 8);
+        else emit_bytes(2, CLOX_OP_CLOSURE, idx);
+
+        for (int i = 0; i < function->upvalue_count; i++) {
+            emit_byte(resolver->upvalues[i].is_local ? 1 : 0);
+            emit_bytes(2, resolver->upvalues[i].idx & 0xff, resolver->upvalues[i].idx >> 8);
+        }
+    }
+
     FREE(Resolver, resolver);
     return error ? NULL : function;
 }
@@ -329,6 +355,8 @@ static void declare_local() {
         Local *local = &current_resolver->locals[current_resolver->local_count++];
         local->name = *identifier;
         local->depth = -1;
+        // by default all variables are not captured
+        local->captured = false;
     }
 }
 
@@ -362,8 +390,8 @@ static void function_declaration() {
     // declare and define function before compile body
     if (current_resolver->scope_depth > 0) {
         declare_local();
-        function(TYPE_FUNCTION);
         define_local();
+        function(TYPE_FUNCTION);
     } else {
         uint16_t idx = declare_global();
         function(TYPE_FUNCTION);
@@ -392,8 +420,7 @@ static void function(FunctionType type) {
     // optional
     end_scope();
 
-    FunctionObj *self = free_resolver();
-    emit_bytes(2, CLOX_OP_CONSTANT, make_constant(OBJ_VALUE(self)));
+    free_resolver(); 
 }
 
 static void statement() {
@@ -427,9 +454,14 @@ static void begin_scope() {
 static void end_scope() {
     current_resolver->scope_depth--;
     int i = current_resolver->local_count - 1;
-    for (; current_resolver->locals[i].depth > current_resolver->scope_depth && i >= 0; i--);
-    int cnt = current_resolver->local_count - 1 - i;
-    if (cnt > 0) emit_bytes(2, CLOX_OP_POP, current_resolver->local_count - 1 - i);
+    for (int i = current_resolver->local_count - 1; i >= 0; i--) {
+        Local *local = &current_resolver->locals[i];
+        if (local->depth <= current_resolver->scope_depth) break;
+        // pop upvalue
+        if (local->captured) emit_byte(CLOX_OP_CLOSE_UPVALUE);
+        // pop local variable
+        else emit_byte(CLOX_OP_POP);
+    }
     current_resolver->local_count = i + 1;
 }
 
@@ -441,13 +473,13 @@ static void if_statement() {
 
     int if_offset = emit_jump(CLOX_OP_JUMP_IF_FALSE);
     // pop condition expression on true
-    emit_bytes(2, CLOX_OP_POP, 1);
+    emit_byte(CLOX_OP_POP);
     
     statement();
     int else_offset = emit_jump(CLOX_OP_JUMP);
     patch_jump(if_offset);
     // pop condition expression on false
-    emit_bytes(2, CLOX_OP_POP, 1);
+    emit_byte(CLOX_OP_POP);
     
     if (match(1, CLOX_TOKEN_ELSE)) statement();
 
@@ -461,12 +493,12 @@ static void while_statement() {
     consume(CLOX_TOKEN_RIGHT_PAREN, "Expect ')' after condition.");
     int end_while = emit_jump(CLOX_OP_JUMP_IF_FALSE);
     // pop condition expression on true
-    emit_bytes(2, CLOX_OP_POP, 1);
+    emit_byte(CLOX_OP_POP);
     statement();
     emit_loop(start);
     patch_jump(end_while);
     // pop condition expression on false
-    emit_bytes(2, CLOX_OP_POP, 1);
+    emit_byte(CLOX_OP_POP);
 }
 
 static void for_statement() {
@@ -489,7 +521,7 @@ static void for_statement() {
         consume(CLOX_TOKEN_SEMICOLON, "Expect ';' after loop condition.");
         end_for = emit_jump(CLOX_OP_JUMP_IF_FALSE);
         // pop condition expression on true
-        emit_bytes(2, CLOX_OP_POP, 1);
+        emit_byte(CLOX_OP_POP);
     }
 
     // increment
@@ -498,7 +530,7 @@ static void for_statement() {
         int increment = current_chunk()->count;
         expression();
         consume(CLOX_TOKEN_RIGHT_PAREN, "Expect ')' after for clauses.");
-        emit_bytes(2, CLOX_OP_POP, 1);
+        emit_byte(CLOX_OP_POP);
         emit_loop(start);
         start = increment;
         patch_jump(body);
@@ -511,7 +543,7 @@ static void for_statement() {
     if (end_for != -1) {
         patch_jump(end_for);
         // pop condition expression on false
-        emit_bytes(2, CLOX_OP_POP, 1);
+        emit_byte(CLOX_OP_POP);
     }
 
     end_scope();
@@ -532,7 +564,7 @@ static void return_statement() {
 static void expression_statement() {
     expression();
     consume(CLOX_TOKEN_SEMICOLON, "Expect ';' after expression.");
-    emit_bytes(2, CLOX_OP_POP, 1);
+    emit_byte(CLOX_OP_POP);
 }
 
 static void expression() {
@@ -563,17 +595,23 @@ static void variable(bool assign) {
         else emit_bytes(2, CLOX_OP_##operation##_##scope, (idx));\
     } while(0);
     
-    int local_idx = resolve_local(parser->previous);
-    int global_idx = 0;
-    if (local_idx == -1) global_idx = make_constant(OBJ_VALUE(new_string(parser->previous->lexeme, parser->previous->length))); 
+    int local_idx = resolve_local(parser->previous, current_resolver);
+    int upvalue_idx = -1;
+    int global_idx = -1;
+    if (local_idx == -1) {
+        upvalue_idx = resolve_upvalue(parser->previous, current_resolver);
+        if (upvalue_idx == -1) global_idx = make_constant(OBJ_VALUE(new_string(parser->previous->lexeme, parser->previous->length)));
+    }
     if (assign && match(1, CLOX_TOKEN_EQUAL)) {
         expression();
         // set variables
         if (local_idx != -1) {
             // local set
             PARSE_VARIABLE(SET, local_idx, LOCAL);
-        }
-        else {
+        } else if (upvalue_idx != -1) {
+            // upvalue set
+            PARSE_VARIABLE(SET, upvalue_idx, UPVALUE);
+        } else {
             // global set
             PARSE_VARIABLE(SET, global_idx, GLOBAL);
         }
@@ -582,8 +620,10 @@ static void variable(bool assign) {
         if (local_idx != -1) {
             // local get
             PARSE_VARIABLE(GET, local_idx, LOCAL);
-        }
-        else {
+        } else if (upvalue_idx != -1) {
+            // upvalue get
+            PARSE_VARIABLE(GET, upvalue_idx, UPVALUE);
+        } else {
             // global set
             PARSE_VARIABLE(GET, global_idx, GLOBAL);
         }
@@ -592,15 +632,43 @@ static void variable(bool assign) {
 #undef PARSE_VARIABLE
 }
 
-static int resolve_local(Token* token) {
-    for (int i = current_resolver->local_count - 1; i >= 0; i--) {
-        Local *local = &current_resolver->locals[i];
+static int resolve_local(Token *token, Resolver *resolver) {
+    for (int i = resolver->local_count - 1; i >= 0; i--) {
+        Local *local = &resolver->locals[i];
         if (token_equal(token, &local->name)) {
             if (local->depth == -1) error_report(token, "Can't read local variable in its own initializer.");
             return i;
         }
     }
     return -1;
+}
+
+static int resolve_upvalue(Token *token, Resolver *resolver) {
+    if (resolver->enclose == NULL) return -1;
+
+    int local = resolve_local(token, resolver->enclose);
+    if (local != -1) {
+        // inner function upvalue a local variable => capture it
+        resolver->enclose->locals[local].captured = true;
+        return add_upvalue(local, true, resolver);
+    } 
+    
+    int upvalue = resolve_upvalue(token, resolver->enclose);
+    if (upvalue != -1) return add_upvalue(upvalue, false, resolver);
+    
+    return -1;
+}
+
+static int add_upvalue(int local, bool is_local, Resolver *resolver) {
+    int upvalue_cnt = resolver->function->upvalue_count;
+    for (int i = 0; i < upvalue_cnt; i++) {
+        UpValue *upvalue = &resolver->upvalues[i];
+        if (upvalue->idx == local && upvalue->is_local == is_local) return i;
+     }
+    if (upvalue_cnt == UINT16_COUNT) error_report(parser->previous, "Too many closure variables in function.");
+    resolver->upvalues[upvalue_cnt].idx = local;
+    resolver->upvalues[upvalue_cnt].is_local = is_local;
+    return resolver->function->upvalue_count++;
 }
 
 static void grouping(bool assign) {
@@ -725,7 +793,7 @@ static void string(bool assign) {
 static void and(bool assign) {
     int if_jump = emit_jump(CLOX_OP_JUMP_IF_FALSE);
     // pop on left operand is true
-    emit_bytes(2, CLOX_OP_POP, 1);
+    emit_byte(CLOX_OP_POP);
     parse_precedence(PREC_AND);
     patch_jump(if_jump);
 }
@@ -735,7 +803,7 @@ static void or(bool assign) {
     int end_jump = emit_jump(CLOX_OP_JUMP);
     patch_jump(else_jump);
     // pop on left operand is false
-    emit_bytes(2, CLOX_OP_POP, 1);
+    emit_byte(CLOX_OP_POP);
     parse_precedence(PREC_OR);
     patch_jump(end_jump);
 }
@@ -744,12 +812,12 @@ static void xor(bool assign) {
     parse_precedence(PREC_XOR);
     int if_jump = emit_jump(CLOX_OP_JUMP_IF_FALSE);
     // pop on right operand is true
-    emit_bytes(2, CLOX_OP_POP, 1);
+    emit_byte(CLOX_OP_POP);
     emit_byte(CLOX_OP_NOT);
     int pop_jump = emit_jump(CLOX_OP_JUMP);
     patch_jump(if_jump);
     // pop on right operand is false
-    emit_bytes(2, CLOX_OP_POP, 1);
+    emit_byte(CLOX_OP_POP);
     patch_jump(pop_jump);
 }
 
