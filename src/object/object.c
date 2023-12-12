@@ -6,9 +6,10 @@
 #include <string.h>
 // added for print obj
 #include <stdio.h>
+// added for free
+#include <stdlib.h>
 
 static Obj* new_obj(ObjType type, size_t size);
-static void free_obj(Obj *obj);
 static StringObj* take_string(const char *str, int length);
 static uint32_t hash_string(const char *str, int length);
 
@@ -56,7 +57,7 @@ StringObj* new_string(const char *str, int length) {
     char *heap_str = ALLOCATE(char, length + 1);
     memcpy(heap_str, str, length);
     heap_str[length] = '\0';
-    return take_string(heap_str, length);  
+    return take_string(heap_str, length);
 }
 
 Value append_string(Value a, Value b) {
@@ -75,7 +76,7 @@ FunctionObj* new_function() {
     function->arity = 0;
     function->name = NULL;
     init_chunk(&function->chunk);
-    function->upvalue_count = 0;
+    function->upvalue_cnt = 0;
     return function;
 }
 
@@ -87,11 +88,13 @@ NativeObj* new_native(native_func func, StringObj *name) {
 }
 
 ClosureObj* new_closure(FunctionObj *function) {
+    // make sure to allocate upvalues first => upvalues will not be liked to objects list => it cannot be reaped by gc
+    UpvalueObj **upvalues = ALLOCATE(UpvalueObj*, function->upvalue_cnt);
+    for (int i = 0; i < function->upvalue_cnt; i++) upvalues[i] = NULL; 
     ClosureObj *closure = (ClosureObj*)new_obj(OBJ_CLOSURE, sizeof(ClosureObj));
     closure->function = function;
-    closure->upvalue_count = function->upvalue_count;
-    closure->upvalues = ALLOCATE(UpvalueObj*, closure->upvalue_count);
-    for (int i = 0; i < closure->upvalue_count; i++) closure->upvalues[i] = NULL;
+    closure->upvalue_cnt = function->upvalue_cnt;
+    closure->upvalues = upvalues;
     return closure;
 }
 
@@ -110,24 +113,32 @@ UpvalueObj* new_upvalue(Value *slot) {
 }
 
 void free_objs() {
-    Obj *objs = vm.objs;
-    while (objs) {
-        Obj *next = objs->next;
-        free_obj(objs);
-        objs = next;
+    Obj *cur = &vm.objs;
+    while (cur->next != NULL) {
+        Obj *next = cur->next;
+        cur->next = next->next;
+        free_obj(next);
     }
-    vm.objs = NULL;
+    // free gray stack
+    // free(vm.gray_stack);
 }
 
 static Obj* new_obj(ObjType type, size_t size) {
     Obj *obj = (Obj*)reallocate(NULL, 0, size);
     obj->type = type;
-    obj->next = vm.objs;
-    vm.objs = obj;
+    obj->is_marked = false;
+    obj->next = vm.objs.next;
+    vm.objs.next = obj;
+#ifdef CLOX_DEBUG_LOG_GC
+    printf("%p allocate %zu for %d\n", (void*)obj, size, type);
+#endif // CLOX_DEBUG_LOG_GC
     return obj;
 }
 
-static void free_obj(Obj *obj) {
+void free_obj(Obj *obj) {
+#ifdef CLOX_DEBUG_LOG_GC
+    printf("%p free type %d\n", (void*)obj, obj->type);
+#endif // CLOX_DEBUG_LOX_GC
     switch (obj->type) {
         case OBJ_STRING:
             StringObj *string = (StringObj*)obj;
@@ -147,7 +158,7 @@ static void free_obj(Obj *obj) {
             break;
         case OBJ_CLOSURE:
             ClosureObj *closure = (ClosureObj*)obj;
-            FREE_ARRAY(UpvalueObj*, closure->upvalues, closure->upvalue_count);
+            FREE_ARRAY(UpvalueObj*, closure->upvalues, closure->upvalue_cnt);
             FREE(ClosureObj, obj);
             break;
         case OBJ_UPVALUE:
@@ -169,7 +180,10 @@ static StringObj* take_string(const char *str, int length) {
     string->length = length;
     string->str = str;
     string->hash = hash;
+    // table_put may trigger gc
+    push_gc(OBJ_VALUE(string));
     table_put(string, NIL_VALUE, &vm.strings);
+    pop_gc();
     return string;
 }
 

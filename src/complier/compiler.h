@@ -7,5 +7,6 @@
 #define UINT16_COUNT (UINT16_MAX + 1) 
 
 FunctionObj* compile(const char *source);
+void mark_compiler_roots();
 
 #endif

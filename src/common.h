@@ -7,5 +7,7 @@
 
 // #define CLOX_DEBUG_TRACE_EXECUTION  // this macro will trace all instructions while executing
 // #define CLOX_DEBUG_DISASSEMBLE      // this macro will print the disassembled bytecode
+#define CLOX_DEBUG_STRESS_GC           // this macro will force the garbage collector to run on every allocation
+// #define CLOX_DEBUG_LOG_GC              // this macro will print the garbage collector's status
 
 #endif // clox_common_h

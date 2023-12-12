@@ -137,7 +137,7 @@ static int print_function(const char *name, Chunk *chunk, int offset, int idx) {
     print_value(OBJ_VALUE(function));
     printf("\n");
 
-    for (int i = 0; i < function->upvalue_count; i++, offset += 3) {
+    for (int i = 0; i < function->upvalue_cnt; i++, offset += 3) {
         uint8_t is_local = single_byte(chunk, offset);
         uint16_t idx = double_bytes(chunk, offset + 1);
         printf("%04d      | ", offset);

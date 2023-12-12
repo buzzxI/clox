@@ -32,9 +32,6 @@
 
 // Returns the nth Fibonacci number
 // {
-
-// }
-// {
 //     fun fibonacci(n) {
 //         if (n == 0) {
 //           return 0;
@@ -54,20 +51,28 @@
 //     print end - begin;
 // }
 
-fun fibonacci(n) {
-    if (n == 0) {
-      return 0;
-    } else if (n == 1) {
-      return 1;
-    } else {
-      return fibonacci(n - 1) + fibonacci(n - 2);
-    }
-}
-var begin = clock();
-print fibonacci(15);
-var end = clock();
-print end - begin;
+// fun fibonacci(n) {
+//     if (n == 0) {
+//       return 0;
+//     } else if (n == 1) {
+//       return 1;
+//     } else {
+//       return fibonacci(n - 1) + fibonacci(n - 2);
+//     }
+// }
+// var begin = clock();
+// print fibonacci(15);
+// var end = clock();
+// print end - begin;
 
+// fun outer() {
+//   var val = 1;
+//   fun inner() {
+//     print val;
+//   }
+//   return inner;
+// }
+// outer()();
 
 // fun outer() {
 //   var a = 1;
@@ -80,7 +85,6 @@ print end - begin;
 //     }
 //   }
 // }
-
 // outer();
 
 // var globalSet;
@@ -129,3 +133,16 @@ print end - begin;
 
 // set();
 // get();
+
+fun outer() {
+    var i = 0;
+    fun inner() {
+        i = i + 1;
+        print i;
+    }
+    return inner;
+}
+
+var rst = outer();
+rst();
+rst();

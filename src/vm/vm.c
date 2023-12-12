@@ -31,10 +31,19 @@ VM vm;
 
 void init_vm() {
     reset_stack();
-    vm.objs = NULL;
+    vm.objs.next = NULL;
     init_table(&vm.strings);
     init_table(&vm.globals);
     define_native("clock", native_clock);
+
+    // vm.gray_stack = NULL;
+    vm.gray_count = 0;
+    // vm.gray_capacity = 0;
+
+    vm.allocated_bytes = 0;
+    // by default, threshold is 1MB
+    vm.next_gc = 1024 * 1024;
+    vm.gc_stack_cnt = 0;
 }
 
 void free_vm() {
@@ -47,10 +56,13 @@ InterpreterResult interpret(const char *source) {
     init_vm();
     FunctionObj *function = compile(source);
     if (function == NULL) return INTERPRET_COMPLIE_ERROR;
+    // push function to a gc stack
+    push_gc(OBJ_VALUE(function));
     ClosureObj *closure = new_closure(function);
     push(OBJ_VALUE(closure));
     invoke(closure, 0);
     InterpreterResult rst = run();
+    pop_gc();
     free_vm();
     return rst; 
 }
@@ -135,7 +147,14 @@ static InterpreterResult run() {
             case CLOX_OP_ADD: {
                 Value b = pop();
                 Value a = pop();
-                if (IS_STRING(a) && IS_STRING(b)) push(append_string(a, b));
+                if (IS_STRING(a) && IS_STRING(b)) {
+                    // append_string may trigger gc
+                    push_gc(a);
+                    push_gc(b);
+                    push(append_string(a, b));
+                    pop_gc();
+                    pop_gc();
+                }
                 else if (IS_NUMBER(a) && IS_NUMBER(b)) push(NUMBER_VALUE(AS_NUMBER(a) + AS_NUMBER(b)));
                 else {
                     runtime_error("operands must be two numbers or two strings.");
@@ -207,12 +226,19 @@ static InterpreterResult run() {
                 break;
             case CLOX_OP_DEFINE_GLOBAL:{
                 StringObj *identifier = AS_STRING(READ_CONSTANT());
-                table_put(identifier, pop(), &vm.globals);
+                Value value = pop();
+                // put a pair may cause a gc
+                push_gc(value);
+                table_put(identifier, value, &vm.globals);
+                pop_gc();
                 break;
             }
             case CLOX_OP_DEFINE_GLOBAL_16: {
                 StringObj *identifier = AS_STRING(READ_CONSTANT_16());
-                table_put(identifier, pop(), &vm.globals);
+                Value value = pop();
+                push_gc(value);
+                table_put(identifier, value, &vm.globals);
+                pop_gc();
                 break;
             }
             case CLOX_OP_GET_GLOBAL: {
@@ -299,25 +325,27 @@ static InterpreterResult run() {
             case CLOX_OP_CLOSURE: {
                 FunctionObj *function = AS_FUNCTION(READ_CONSTANT()); 
                 ClosureObj *closure = new_closure(function);
-                for (int i = 0; i < closure->upvalue_count; i++) {
+                // early push (in case of gc)
+                push(OBJ_VALUE(closure));
+                for (int i = 0; i < closure->upvalue_cnt; i++) {
                     uint8_t *is_local = read_bytes(1);
                     uint16_t *idx = read_bytes(2);
                     if (*is_local) closure->upvalues[i] = new_upvalue(frame->slots + *idx);
                     else closure->upvalues[i] = frame->closure->upvalues[*idx];
                 }   
-                push(OBJ_VALUE(closure));
                 break;
             }
             case CLOX_OP_CLOSURE_16: {
                 FunctionObj *function = AS_FUNCTION(READ_CONSTANT_16());
                 ClosureObj *closure = new_closure(function);
-                for (int i = 0; i < closure->upvalue_count; i++) {
+                // early push (in case of gc)
+                push(OBJ_VALUE(closure));
+                for (int i = 0; i < closure->upvalue_cnt; i++) {
                     uint8_t *is_local = read_bytes(1);
                     uint16_t *idx = read_bytes(2);
                     if (*is_local) closure->upvalues[i] = new_upvalue(frame->slots + *idx);
                     else closure->upvalues[i] = frame->closure->upvalues[*idx];
                 }
-                push(OBJ_VALUE(closure));
                 break;
             }
             case CLOX_OP_GET_UPVALUE: {
@@ -353,6 +381,18 @@ static InterpreterResult run() {
 #undef READ_CONSTANT
 #undef READ_CONSTANT_16
 #undef BINARY_OP
+}
+
+void push_gc(Value value) {
+    if (vm.gc_stack_cnt == UINT8_COUNT) {
+        runtime_error("gc stack overflow.");
+        return;
+    }
+    vm.gc_stack[vm.gc_stack_cnt++] = value;
+}
+
+Value pop_gc() {
+    return vm.gc_stack[--vm.gc_stack_cnt];
 }
 
 static bool function_call(Value function, uint8_t arg_cnt) {
@@ -451,9 +491,17 @@ static Value peek(int distance) {
     return vm.sp[-1 - distance];
 }
 
+// define a native unlikely trigger gc (as it starts before running vm), but i reserve the push&pop operations
 static void define_native(const char *name, native_func native) {
     StringObj *native_name = new_string(name, strlen(name));
-    table_put(native_name, OBJ_VALUE(new_native(native, native_name)), &vm.globals);
+    // new native may trigger gc 
+    push_gc(OBJ_VALUE(native_name));
+    Value native_function = OBJ_VALUE(new_native(native, native_name));
+    // table put may trigger gc
+    push_gc(native_function); 
+    table_put(native_name, native_function, &vm.globals);
+    pop_gc();
+    pop_gc();
 }
 
 static Value native_clock(int argc, Value *args) {

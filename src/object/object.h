@@ -32,6 +32,7 @@ typedef enum {
 
 struct Obj {
     ObjType type;
+    bool is_marked;
     Obj *next;
 };
 
@@ -47,7 +48,7 @@ struct FunctionObj {
     StringObj *name;
     int arity;
     Chunk chunk;
-    int upvalue_count;
+    int upvalue_cnt;
 };
 
 struct NativeObj {
@@ -60,7 +61,7 @@ struct ClosureObj {
     Obj obj;
     FunctionObj *function;
     UpvalueObj **upvalues;
-    int upvalue_count;
+    int upvalue_cnt;
 };
 
 struct UpvalueObj {
@@ -85,6 +86,7 @@ NativeObj *new_native(native_func func, StringObj *name);
 ClosureObj *new_closure(FunctionObj *function);
 UpvalueObj *new_upvalue(Value *slot);
 
+void free_obj(Obj *obj);
 void free_objs();
 
 #endif

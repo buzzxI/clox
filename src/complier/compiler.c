@@ -56,11 +56,13 @@ typedef struct {
 typedef struct Resolver {
     struct Resolver *enclose;
 
-    Local locals[UINT16_COUNT];
-    int local_count;
+    Local *locals;
+    int local_cnt;
+    int local_capacity;
     int scope_depth;
 
-    UpValue upvalues[UINT16_COUNT];
+    UpValue *upvalues;
+    int upvalues_capacity;
 
     FunctionObj *function;
     FunctionType type;
@@ -206,6 +208,15 @@ FunctionObj* compile(const char *source) {
     return rst;
 }
 
+void mark_compiler_roots() {
+    Resolver *resolver = current_resolver;
+    // functions are roots
+    while (resolver != NULL) {
+        mark_obj((Obj*)resolver->function);
+        resolver = resolver->enclose;
+    }
+}
+
 static void init_parser(const char *source) {
     parser = ALLOCATE(Parser, 1);
     parser->previous = NULL;
@@ -226,40 +237,46 @@ static void free_parser() {
 static void init_resolver(FunctionType type) {
     Resolver *resolver = ALLOCATE(Resolver, 1); 
 
-    resolver->local_count = 0;
     resolver->scope_depth = 0;
 
     // first local is reserved for implicit function (self)
-    Local *local = &resolver->locals[resolver->local_count++];
+    resolver->local_capacity = GROW_CAPACITY(0);
+    resolver->locals = GROW_ARRAY(Local, NULL, 0, resolver->local_capacity);
+    resolver->local_cnt = 0;
+    Local *local = &resolver->locals[resolver->local_cnt++];
     local->depth = 0;
     local->name.lexeme = "";
     local->name.length = 0;
     // slot 0 is reserved for implicit function (self) => not captured 
     local->captured = false;
 
+    resolver->upvalues = NULL;
+    resolver->upvalues_capacity = 0;
+
     resolver->function = new_function();
+    // overwrite current resovler before new a function name
+    resolver->enclose = current_resolver;
+    current_resolver = resolver;
+
     if (type != TYPE_SCRIPT) {
         // function name
         resolver->function->name = new_string(parser->previous->lexeme, parser->previous->length);
     }
     resolver->type = type;
-
-    resolver->enclose = current_resolver;
-    current_resolver = resolver;
 }
 
 static FunctionObj* free_resolver() {
     emit_nil_return();
+    
+    Resolver *resolver = current_resolver;
+    current_resolver = current_resolver->enclose;
 
-    FunctionObj *function = current_resolver->function;
+    FunctionObj *function = resolver->function;
 
     bool error = parser->had_error;
 #ifdef  CLOX_DEBUG_DISASSEMBLE 
     if (!error) disassemble_chunk(current_chunk(), function->name == NULL ? "clox script" : function->name->str);
 #endif  // CLOX_DEBUG_DISASSEMBLE
-
-    Resolver *resolver = current_resolver;
-    current_resolver = current_resolver->enclose; 
 
     // resolve upvalues
     if (current_resolver != NULL) {
@@ -268,12 +285,14 @@ static FunctionObj* free_resolver() {
         if (idx > UINT8_MAX) emit_bytes(3, CLOX_OP_CLOSURE_16, idx & 0xff, idx >> 8);
         else emit_bytes(2, CLOX_OP_CLOSURE, idx);
 
-        for (int i = 0; i < function->upvalue_count; i++) {
+        for (int i = 0; i < function->upvalue_cnt; i++) {
             emit_byte(resolver->upvalues[i].is_local ? 1 : 0);
             emit_bytes(2, resolver->upvalues[i].idx & 0xff, resolver->upvalues[i].idx >> 8);
         }
     }
 
+    FREE(UpValue, resolver->upvalues);
+    FREE(Local, resolver->locals);
     FREE(Resolver, resolver);
     return error ? NULL : function;
 }
@@ -345,19 +364,22 @@ static void global_declaration() {
 
 static void declare_local() {
     Token *identifier = parser->previous;
-    if (current_resolver->local_count == UINT16_COUNT) error_report(identifier, "Too many local variables in function.");
-    else {
-        for (int i = current_resolver->local_count - 1; i >= 0; i--) {
-            Local *local = &current_resolver->locals[i];
-            if (local->depth != -1 && local->depth < current_resolver->scope_depth) break;
-            if (token_equal(identifier, &local->name)) error_report(identifier, "Already variable with this name in this scope.");
-        }
-        Local *local = &current_resolver->locals[current_resolver->local_count++];
-        local->name = *identifier;
-        local->depth = -1;
-        // by default all variables are not captured
-        local->captured = false;
+    for (int i = current_resolver->local_cnt - 1; i >= 0; i--) {
+        Local *local = &current_resolver->locals[i];
+        if (local->depth != -1 && local->depth < current_resolver->scope_depth) break;
+        if (token_equal(identifier, &local->name)) error_report(identifier, "Already variable with this name in this scope.");
     }
+    if (current_resolver->local_cnt + 1 > current_resolver->local_capacity) {
+        int old_capcaity = current_resolver->local_capacity;
+        current_resolver->local_capacity = GROW_CAPACITY(old_capcaity);
+        current_resolver->locals = GROW_ARRAY(Local, current_resolver->locals, old_capcaity, current_resolver->local_capacity);
+    }
+
+    Local *local = &current_resolver->locals[current_resolver->local_cnt++];
+    local->name = *identifier;
+    local->depth = -1;
+    // by default all variables are not captured
+    local->captured = false;
 }
 
 static bool token_equal(Token *a, Token *b) {
@@ -377,7 +399,7 @@ static void variable_initializer() {
 }
 
 static void define_local() {
-    current_resolver->locals[current_resolver->local_count - 1].depth = current_resolver->scope_depth;
+    current_resolver->locals[current_resolver->local_cnt - 1].depth = current_resolver->scope_depth;
 }
 
 static void define_global(uint16_t idx) {
@@ -453,8 +475,8 @@ static void begin_scope() {
 
 static void end_scope() {
     current_resolver->scope_depth--;
-    int i = current_resolver->local_count - 1;
-    for (int i = current_resolver->local_count - 1; i >= 0; i--) {
+    int i = current_resolver->local_cnt - 1;
+    for (int i = current_resolver->local_cnt - 1; i >= 0; i--) {
         Local *local = &current_resolver->locals[i];
         if (local->depth <= current_resolver->scope_depth) break;
         // pop upvalue
@@ -462,7 +484,7 @@ static void end_scope() {
         // pop local variable
         else emit_byte(CLOX_OP_POP);
     }
-    current_resolver->local_count = i + 1;
+    current_resolver->local_cnt = i + 1;
 }
 
 static void if_statement() {
@@ -633,7 +655,7 @@ static void variable(bool assign) {
 }
 
 static int resolve_local(Token *token, Resolver *resolver) {
-    for (int i = resolver->local_count - 1; i >= 0; i--) {
+    for (int i = resolver->local_cnt - 1; i >= 0; i--) {
         Local *local = &resolver->locals[i];
         if (token_equal(token, &local->name)) {
             if (local->depth == -1) error_report(token, "Can't read local variable in its own initializer.");
@@ -660,15 +682,22 @@ static int resolve_upvalue(Token *token, Resolver *resolver) {
 }
 
 static int add_upvalue(int local, bool is_local, Resolver *resolver) {
-    int upvalue_cnt = resolver->function->upvalue_count;
+    int upvalue_cnt = resolver->function->upvalue_cnt;
     for (int i = 0; i < upvalue_cnt; i++) {
         UpValue *upvalue = &resolver->upvalues[i];
         if (upvalue->idx == local && upvalue->is_local == is_local) return i;
-     }
-    if (upvalue_cnt == UINT16_COUNT) error_report(parser->previous, "Too many closure variables in function.");
-    resolver->upvalues[upvalue_cnt].idx = local;
-    resolver->upvalues[upvalue_cnt].is_local = is_local;
-    return resolver->function->upvalue_count++;
+    }
+
+    if (upvalue_cnt + 1 > resolver->upvalues_capacity) {
+        int old_capacity = resolver->upvalues_capacity;
+        resolver->upvalues_capacity = GROW_CAPACITY(old_capacity);
+        resolver->upvalues = GROW_ARRAY(UpValue, resolver->upvalues, old_capacity, resolver->upvalues_capacity);
+    }
+
+    UpValue *upvalue = &resolver->upvalues[upvalue_cnt];
+    upvalue->idx = local;
+    upvalue->is_local = is_local;
+    return resolver->function->upvalue_cnt++;
 }
 
 static void grouping(bool assign) {

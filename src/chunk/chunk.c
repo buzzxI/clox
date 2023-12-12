@@ -1,5 +1,6 @@
 #include "chunk.h"
 #include "memory/memory.h"
+#include "vm/vm.h"
 
 void init_chunk(Chunk *chunk) {
     chunk->capacity = 0;
@@ -33,6 +34,9 @@ void free_chunk(Chunk *chunk) {
 }
 
 int append_constant(Chunk *chunk, Value value) {
+    // while append a constant may trigger reallocate constant pool
+    push_gc(value);
     write_value_array(&chunk->constant, value);
+    pop_gc(value);
     return chunk->constant.count - 1;
 }

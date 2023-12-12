@@ -19,11 +19,23 @@ typedef struct {
     int frame_cnt;
     Value stack[MAX_STACK];
     Value *sp;
-    Obj *objs;
+    // a linked list with dummy head
+    Obj objs;
     Table strings;
     Table globals;
     // a linked list with dummy head
     UpvalueObj upvalues;
+    // gray stack for traversal
+    Obj* gray_stack[MAX_STACK];
+    // Obj **gray_stack;
+    int gray_count;
+    // int gray_capacity;
+    // fields trigger gc
+    size_t allocated_bytes;
+    size_t next_gc;
+    // a temporary stack for gc
+    Value gc_stack[UINT8_COUNT];
+    int gc_stack_cnt;
 } VM;
 
 typedef enum {
@@ -38,5 +50,9 @@ extern VM vm;
 void init_vm();
 void free_vm();
 InterpreterResult interpret(const char *source);
+// push a value into gc stack
+void push_gc(Value value);
+// pop a value from gc stack
+Value pop_gc();
 
 #endif // clox_vm_h

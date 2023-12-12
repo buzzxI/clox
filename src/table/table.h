@@ -15,7 +15,6 @@ typedef struct {
     Entry* entries;
 } Table;
 
-
 void init_table(Table *table);
 void free_table(Table *table);
 bool table_put(StringObj *key, Value value, Table *table);

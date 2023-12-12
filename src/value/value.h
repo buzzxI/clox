@@ -9,6 +9,7 @@
 
 #define AS_NUMBER(value)    ((value).data.number)
 #define AS_BOOL(value)      ((value).data.boolean)
+#define AS_OBJ(value)       ((value).data.obj)
 
 #define IS_NUMBER(value)    ((value).type == VAL_NUMBER)
 #define IS_BOOL(value)      ((value).type == VAL_BOOL)
