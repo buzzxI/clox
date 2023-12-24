@@ -72,7 +72,7 @@ StringObj* table_find_string(const char *str, int length, uint32_t hash, Table *
         Entry *entry = &table->entries[(idx + i) & (table->capacity - 1)];
         if (entry->key != NULL) {
             if (entry->key->length == length && entry->key->hash == hash && memcmp(entry->key->str, str, length) == 0) return entry->key;
-        } else if (entry->value.type == VAL_NIL) return NULL;
+        } else if (IS_NIL(entry->value)) return NULL;
     }
     return NULL;
 }
@@ -85,7 +85,7 @@ static Entry* find_entry_by_hash(StringObj *key, Entry *entries, int size) {
         Entry *entry = &entries[(idx + i) & (size - 1)];
         if (entry->key == key) return entry;
         else if (entry->key == NULL) {
-            if (entry->value.type == VAL_NIL) return tombstone == NULL ? entry : tombstone;
+            if (IS_NIL(entry->value)) return tombstone == NULL ? entry : tombstone;
             else if (tombstone == NULL) tombstone = entry;
         }
     }

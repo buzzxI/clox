@@ -10,4 +10,6 @@
 #define CLOX_DEBUG_STRESS_GC           // this macro will force the garbage collector to run on every allocation
 // #define CLOX_DEBUG_LOG_GC              // this macro will print the garbage collector's status
 
+#define NAN_BOXING                     // this macro will enable NaN-boxing
+
 #endif // clox_common_h

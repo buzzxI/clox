@@ -26,6 +26,12 @@ void free_value_array(ValueArray *array) {
 }
 
 void print_value(Value value) {
+#ifdef NAN_BOXING
+    if (IS_BOOL(value)) printf(AS_BOOL(value) ? "true" : "false");
+    else if (IS_NIL(value)) printf("nil");
+    else if (IS_NUMBER(value)) printf("%g", AS_NUMBER(value));
+    else if (IS_OBJ(value)) print_obj(value);
+#else
     switch (value.type) {
         case VAL_BOOL:
             printf(AS_BOOL(value) ? "true" : "false");
@@ -40,6 +46,7 @@ void print_value(Value value) {
             print_obj(value);
             break;
     }
+#endif // NAN_BOXING
 }
 
 bool is_false(Value value) {
@@ -47,6 +54,11 @@ bool is_false(Value value) {
 }
 
 bool values_equal(Value a, Value b) {
+#ifdef NAN_BOXING
+    // NaN is not equal to NaN
+    if (IS_NUMBER(a) && IS_NUMBER(b)) return AS_NUMBER(a) == AS_NUMBER(b);
+    return a == b;
+#else
     if (a.type != b.type) return false;
     switch (a.type) {
         case VAL_BOOL: return AS_BOOL(a) == AS_BOOL(b);
@@ -54,5 +66,7 @@ bool values_equal(Value a, Value b) {
         case VAL_NIL: return true;
         case VAL_OBJ: return objs_equal(a, b);
     }
+#endif // NAN_BOXING
+    
     return false;
 }

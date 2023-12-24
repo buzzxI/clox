@@ -5,7 +5,7 @@
 #include "chunk/chunk.h"
 #include "table/table.h"
 
-#define OBJ_TYPE(value)     ((value).data.obj->type)
+#define OBJ_TYPE(value)     (AS_OBJ(value)->type)
 #define IS_STRING(value)    (isObjType(value, OBJ_STRING))
 #define IS_INSTANCE(value)  (isObjType(value, OBJ_INSTANCE))
 #define IS_FUNCTION(value)  (isObjType(value, OBJ_FUNCTION))
@@ -15,15 +15,15 @@
 #define IS_CLASS(value)     (isObjType(value, OBJ_CLASS))
 #define IS_METHOD(value)    (isObjType(value, OBJ_METHOD))
 
-#define AS_STRING(value)    ((StringObj*)(value).data.obj)
-#define AS_CSTRING(value)   (((StringObj*)(value).data.obj)->str)
-#define AS_FUNCTION(value)  ((FunctionObj*)(value).data.obj)
-#define AS_NATIVE(value)    ((NativeObj*)(value).data.obj)
-#define AS_CLOSURE(value)   ((ClosureObj*)(value).data.obj)
-#define AS_UPVALUE(value)   ((UpvalueObj*)(value).data.obj)
-#define AS_CLASS(value)     ((ClassObj*)(value).data.obj)
-#define AS_INSTANCE(value)  ((InstanceObj*)(value).data.obj)
-#define AS_METHOD(value)    ((MethodObj*)(value).data.obj)
+#define AS_STRING(value)    ((StringObj*)AS_OBJ(value))
+#define AS_CSTRING(value)   (((StringObj*)AS_OBJ(value))->str)
+#define AS_FUNCTION(value)  ((FunctionObj*)AS_OBJ(value))
+#define AS_NATIVE(value)    ((NativeObj*)AS_OBJ(value))
+#define AS_CLOSURE(value)   ((ClosureObj*)AS_OBJ(value))
+#define AS_UPVALUE(value)   ((UpvalueObj*)AS_OBJ(value))
+#define AS_CLASS(value)     ((ClassObj*)AS_OBJ(value))
+#define AS_INSTANCE(value)  ((InstanceObj*)AS_OBJ(value))
+#define AS_METHOD(value)    ((MethodObj*)AS_OBJ(value))
 
 typedef Value (*native_func)(int argc, Value *args);
 
