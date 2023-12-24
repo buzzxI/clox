@@ -67,9 +67,9 @@ void table_put_all(Table *dest, Table *src) {
 StringObj* table_find_string(const char *str, int length, uint32_t hash, Table *table) {
     if (table->count == 0) return NULL;
 
-    uint32_t idx = hash % table->capacity;
+    uint32_t idx = hash & (table->capacity - 1);
     for (int i = 0; i < table->capacity; i++) {
-        Entry *entry = &table->entries[(idx + i) % table->capacity];
+        Entry *entry = &table->entries[(idx + i) & (table->capacity - 1)];
         if (entry->key != NULL) {
             if (entry->key->length == length && entry->key->hash == hash && memcmp(entry->key->str, str, length) == 0) return entry->key;
         } else if (entry->value.type == VAL_NIL) return NULL;
@@ -78,10 +78,11 @@ StringObj* table_find_string(const char *str, int length, uint32_t hash, Table *
 }
 
 static Entry* find_entry_by_hash(StringObj *key, Entry *entries, int size) {
-    uint32_t idx = key->hash % size;
+    // optimize modulo operation by bitwise AND
+    uint32_t idx = key->hash & (size - 1);
     Entry *tombstone = NULL;
     for (int i = 0; i < size; i++) {
-        Entry *entry = &entries[(idx + i) % size];
+        Entry *entry = &entries[(idx + i) & (size - 1)];
         if (entry->key == key) return entry;
         else if (entry->key == NULL) {
             if (entry->value.type == VAL_NIL) return tombstone == NULL ? entry : tombstone;

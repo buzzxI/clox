@@ -9,6 +9,7 @@
 #endif // CLOX_DEBUG_LOG_GC
 #define CLOX_GC_HEAP_GROW_FACTOR 2
 
+static void collect_garbage();
 static void mark_roots();
 static void mark_value(Value *value);
 static void mark_table(Table *table);
@@ -20,10 +21,11 @@ static void remove_table_white(Table *table);
 
 void* reallocate(void *ptr, size_t old_size, size_t new_size) {
     vm.allocated_bytes += new_size - old_size;
-    // if (vm.allocated_bytes > vm.next_gc) collect_garbage();
 
 #ifdef CLOX_DEBUG_STRESS_GC
     if (new_size > old_size) collect_garbage();
+#else
+    if (vm.allocated_bytes > vm.next_gc) collect_garbage();
 #endif // CLOX_DEBUG_STRESS_GC
 
     if (new_size == 0) {
@@ -81,11 +83,15 @@ static void mark_roots() {
     // pointers to closure are roots
     for (int i = 0; i < vm.frame_cnt; i++) mark_obj((Obj*)vm.frames[i].closure);
     // pointers to upvalues are roots
-    UpvalueObj *upvalue = &vm.upvalues;
-    while (upvalue->next != NULL) {
-        mark_obj((Obj*)(upvalue->next));
-        upvalue = upvalue->next;
-    }
+    // UpvalueObj *upvalue = &vm.upvalues;
+    // while (upvalue->next != NULL) {
+    //     mark_obj((Obj*)(upvalue->next));
+    //     upvalue = upvalue->next;
+    // }
+
+    // mark initializer string
+    mark_obj((Obj*)vm.init_string);
+
     // mark roots for compile time
     mark_compiler_roots();
     // objects in gc stack are roots
@@ -93,13 +99,7 @@ static void mark_roots() {
 }
 
 static void mark_value(Value *value) {
-    switch (value->type) {
-        // only obj type may cause memory leak
-        case VAL_OBJ:
-            mark_obj(AS_OBJ(*value));
-            break;
-        default: break;
-    }
+    if (IS_OBJ(*value)) mark_obj(AS_OBJ(*value));
 }
 
 static void mark_table(Table *table) {
@@ -151,7 +151,24 @@ static void black_object(Obj *obj) {
             mark_obj((Obj*)closure->function);
             for (int i = 0; i < closure->upvalue_cnt; i++) mark_obj((Obj*)closure->upvalues[i]);
             break;
-
+        }
+        case OBJ_CLASS: {
+            ClassObj *klass = (ClassObj*)obj;
+            mark_obj((Obj*)klass->name);
+            mark_table(&klass->methods);
+            break;
+        }
+        case OBJ_INSTANCE: {
+            InstanceObj *instance = (InstanceObj*)obj;
+            mark_obj((Obj*)instance->klass);
+            mark_table(&instance->fields);
+            break;
+        }
+        case OBJ_METHOD: {
+            MethodObj *method = (MethodObj*)obj;
+            mark_value(&method->receiver);
+            mark_obj((Obj*)method->closure);
+            break;
         }
     }
 }

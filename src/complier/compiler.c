@@ -3,6 +3,9 @@
 #include "chunk/chunk.h"
 #include "object/object.h"
 #include "memory/memory.h"
+#ifdef CLOX_DEBUG_DISASSEMBLE
+#include "disassemble/disassemble.h"
+#endif // CLOX_DEBUG_DISASSEMBLE
 // added for print token
 #include <stdio.h>
 // added for use va_list
@@ -15,6 +18,8 @@
 typedef enum {
     TYPE_SCRIPT,
     TYPE_FUNCTION,
+    TYPE_METHOD,
+    TYPE_INITIALIZER,
 } FunctionType;
 
 typedef enum {
@@ -68,6 +73,11 @@ typedef struct Resolver {
     FunctionType type;
 } Resolver;
 
+typedef struct ClassResolver {
+    struct ClassResolver *enclose;
+    bool has_super;
+} ClassResolver;
+
 typedef void (*parser_func)(bool);
 
 typedef struct {
@@ -80,6 +90,7 @@ typedef struct {
 Parser *parser;
 // however, there may be multiple resolvers
 Resolver *current_resolver = NULL;
+ClassResolver *current_class = NULL;
 
 static void init_parser(const char *source);
 static void free_parser(); 
@@ -87,7 +98,7 @@ static void init_resolver(FunctionType type);
 static FunctionObj* free_resolver();
 static Chunk* current_chunk();
 static void advance();
-static bool match (int cnt, ...);
+static bool match (TokenType type);
 static void consume(TokenType type, const char *message);
 static bool check(TokenType type);
 static void parse_precedence(Precedence precedence);
@@ -97,12 +108,15 @@ static void local_declaration();
 static void global_declaration();
 static void declare_local();
 static bool token_equal(Token *a, Token *b);
+static void add_local(Token *identifier);
 static uint16_t declare_global();
 static void variable_initializer();
 static void define_local();
 static void define_global(uint16_t idx);
 static void function_declaration();
 static void function();
+static void class_declaration();
+static void method();
 static void statement();
 static void print_statement();
 static void block();
@@ -115,11 +129,13 @@ static void return_statement();
 static void expression_statement();
 static void expression();
 static void variable(bool assign);
+static void named_variable(Token *variable, bool assign);
 static int resolve_local(Token *token, Resolver *resolver);
 static int resolve_upvalue(Token *token, Resolver *resolver);
 static int add_upvalue(int local, bool is_local, Resolver *resolver);
 static void grouping(bool assign);
 static void call(bool assign);
+static void dot(bool assign);
 static uint8_t argument_list();
 static void number(bool assign);
 static void unary(bool assign);
@@ -129,17 +145,23 @@ static void string(bool assign);
 static void and(bool assign);
 static void or(bool assign);
 static void xor(bool assign);
+static void this(bool assign);
+static void super(bool assign);
 static void emit_byte(uint8_t byte);
 static void emit_bytes(int cnt, ...);
 static void emit_nil_return();
 static void emit_return();
 static void emit_constant(Value value);
 static uint16_t make_constant(Value value);
+static uint16_t identifier_constant(Token* identifier);
 static int emit_jump(uint8_t instruction);
 static void emit_loop(int start);
 static void patch_jump(int offset);
 static void error_report(Token *token, const char *message);
 static void synchronize();
+
+const Token THIS_TOKEN = {.lexeme = "this", .length = 4};
+const Token SUPER_TOKEN = {.lexeme = "super", .length = 5};
 
 ParserRule rules[] = {
     [CLOX_TOKEN_ERROR]         = { NULL,     NULL,    PREC_NONE },
@@ -148,7 +170,7 @@ ParserRule rules[] = {
     [CLOX_TOKEN_LEFT_BRACE]    = { NULL,     NULL,    PREC_NONE },
     [CLOX_TOKEN_RIGHT_BRACE]   = { NULL,     NULL,    PREC_NONE },
     [CLOX_TOKEN_COMMA]         = { NULL,     NULL,    PREC_NONE },
-    [CLOX_TOKEN_DOT]           = { NULL,     NULL,    PREC_NONE },
+    [CLOX_TOKEN_DOT]           = { NULL,     dot,     PREC_CALL },
     [CLOX_TOKEN_MINUS]         = { unary,    binary,  PREC_TERM },
     [CLOX_TOKEN_PLUS]          = { NULL,     binary,  PREC_TERM },
     [CLOX_TOKEN_SEMICOLON]     = { NULL,     NULL,    PREC_NONE },
@@ -176,8 +198,8 @@ ParserRule rules[] = {
     [CLOX_TOKEN_OR]            = { NULL,     or,      PREC_OR },
     [CLOX_TOKEN_PRINT]         = { NULL,     NULL,    PREC_NONE },
     [CLOX_TOKEN_RETURN]        = { NULL,     NULL,    PREC_NONE },
-    [CLOX_TOKEN_SUPER]         = { NULL,     NULL,    PREC_NONE },
-    [CLOX_TOKEN_THIS]          = { NULL,     NULL,    PREC_NONE },
+    [CLOX_TOKEN_SUPER]         = { super,    NULL,    PREC_NONE },
+    [CLOX_TOKEN_THIS]          = { this,     NULL,    PREC_NONE },
     [CLOX_TOKEN_TRUE]          = { literal,  NULL,    PREC_NONE },
     [CLOX_TOKEN_VAR]           = { NULL,     NULL,    PREC_NONE },
     [CLOX_TOKEN_WHILE]         = { NULL,     NULL,    PREC_NONE },
@@ -199,7 +221,7 @@ FunctionObj* compile(const char *source) {
     init_resolver(TYPE_SCRIPT);
 
     advance();
-    while (!match(1, CLOX_TOKEN_EOF)) {
+    while (!match(CLOX_TOKEN_EOF)) {
         declarations();
     }
     
@@ -245,8 +267,14 @@ static void init_resolver(FunctionType type) {
     resolver->local_cnt = 0;
     Local *local = &resolver->locals[resolver->local_cnt++];
     local->depth = 0;
-    local->name.lexeme = "";
-    local->name.length = 0;
+    // the first slot is this for methods and initializer
+    if (type == TYPE_METHOD || type == TYPE_INITIALIZER) {
+        local->name.lexeme = "this";
+        local->name.length = 4;
+    } else {
+        local->name.lexeme = "";
+        local->name.length = 0;
+    }
     // slot 0 is reserved for implicit function (self) => not captured 
     local->captured = false;
 
@@ -275,7 +303,7 @@ static FunctionObj* free_resolver() {
 
     bool error = parser->had_error;
 #ifdef  CLOX_DEBUG_DISASSEMBLE 
-    if (!error) disassemble_chunk(current_chunk(), function->name == NULL ? "clox script" : function->name->str);
+    if (!error) disassemble_chunk(&function->chunk, function->name == NULL ? "clox script" : function->name->str);
 #endif  // CLOX_DEBUG_DISASSEMBLE
 
     // resolve upvalues
@@ -313,23 +341,16 @@ static void advance() {
 }
 
 // check current token type
-static bool match(int cnt, ...) {
-    va_list args;
-    va_start(args, cnt);
-    bool flag = false;
-    for (int i = 0; i < cnt && !flag; i++) {
-        if (check(va_arg(args, TokenType))) {
-            advance();
-            flag = true; 
-        }
+static bool match(TokenType type) {
+    if (check(type)) {
+        advance();
+        return true;
     }
-    va_end(args);
-    return flag;
+    return false;
 }
 
 static void consume(TokenType type, const char *message) {
-    if (check(type)) advance();
-    else error_report(parser->current, message);
+    if (!match(type)) error_report(parser->current, message); 
 }
 
 static bool check(TokenType type) {
@@ -337,8 +358,9 @@ static bool check(TokenType type) {
 }
 
 static void declarations() {
-    if (match(1, CLOX_TOKEN_VAR)) var_declaration();
-    else if(match(1, CLOX_TOKEN_FUN)) function_declaration();
+    if (match(CLOX_TOKEN_VAR)) var_declaration();
+    else if(match(CLOX_TOKEN_FUN)) function_declaration();
+    else if (match(CLOX_TOKEN_CLASS)) class_declaration();
     else statement();
     if (parser->panic_mode) synchronize();
 }
@@ -369,6 +391,17 @@ static void declare_local() {
         if (local->depth != -1 && local->depth < current_resolver->scope_depth) break;
         if (token_equal(identifier, &local->name)) error_report(identifier, "Already variable with this name in this scope.");
     }
+
+    add_local(identifier); 
+}
+
+static bool token_equal(Token *a, Token *b) {
+    if (a->length != b->length) return false;
+    return memcmp(a->lexeme, b->lexeme, a->length) == 0;
+}
+
+static void add_local(Token *identifier) {
+    // dynamic allocate slot
     if (current_resolver->local_cnt + 1 > current_resolver->local_capacity) {
         int old_capcaity = current_resolver->local_capacity;
         current_resolver->local_capacity = GROW_CAPACITY(old_capcaity);
@@ -377,24 +410,18 @@ static void declare_local() {
 
     Local *local = &current_resolver->locals[current_resolver->local_cnt++];
     local->name = *identifier;
-    local->depth = -1;
+    local->depth = current_resolver->scope_depth;
     // by default all variables are not captured
     local->captured = false;
 }
 
-static bool token_equal(Token *a, Token *b) {
-    if (a->length != b->length) return false;
-    return memcmp(a->lexeme, b->lexeme, a->length) == 0;
-}
-
 static uint16_t declare_global() {
-    Token *identifier = parser->previous;
-    return make_constant(OBJ_VALUE(new_string(identifier->lexeme, identifier->length)));
+    return identifier_constant(parser->previous);
 }
 
 static void variable_initializer() {
     // initializer
-    if (match(1, CLOX_TOKEN_EQUAL)) expression();
+    if (match(CLOX_TOKEN_EQUAL)) expression();
     else emit_byte(CLOX_OP_NIL);
 }
 
@@ -433,7 +460,7 @@ static void function(FunctionType type) {
             consume(CLOX_TOKEN_IDENTIFIER, "Expect parameter name.");
             declare_local();
             define_local();
-        } while (match(1, CLOX_TOKEN_COMMA));
+        } while (match(CLOX_TOKEN_COMMA));
     }
     consume(CLOX_TOKEN_RIGHT_PAREN, "Expect ')' after function parameters list.");
     consume(CLOX_TOKEN_LEFT_BRACE, "Expect '{' before function body.");
@@ -445,16 +472,89 @@ static void function(FunctionType type) {
     free_resolver(); 
 }
 
+static void class_declaration() {
+    consume(CLOX_TOKEN_IDENTIFIER, "Expect class name.");
+    Token class_name = *parser->previous;
+    // append class name into constant pool (no matter it is local or global)
+    uint16_t idx = identifier_constant(&class_name);
+    // class name
+    if (idx > UINT8_MAX) emit_bytes(3, CLOX_OP_CLASS_16, idx & 0xff, idx >> 8);
+    else emit_bytes(2, CLOX_OP_CLASS, idx);
+    
+    // if class is local -> klass remain in stack (referenced as local variable)
+    // if class is global -> klass poped by define_global
+    if (current_resolver->scope_depth) {
+        declare_local();
+        define_local();
+    } else {
+        // define class as global
+        define_global(idx);
+    }
+
+    ClassResolver class;
+    class.enclose = current_class;
+    class.has_super = false;
+    current_class = &class;
+
+    if (match(CLOX_TOKEN_LESS)) {
+        consume(CLOX_TOKEN_IDENTIFIER, "Expect superclass name.");
+        if (token_equal(&class_name, parser->previous)) error_report(parser->previous, "A class can't inherit from itself.");
+
+        // load superclass from local/upvalue/global to stack
+        variable(false);
+        // leave supclass on stack and use "super" to reference
+        begin_scope();
+        add_local(&SUPER_TOKEN);
+        define_local();
+        
+        // load current class from local/upvalue/global to stack
+        named_variable(&class_name, false);
+
+        emit_byte(CLOX_OP_INHERIT);
+        current_class->has_super = true;
+    }
+
+    consume(CLOX_TOKEN_LEFT_BRACE, "Expect '{' before class body.");
+
+    // reload klass to bind method
+    named_variable(&class_name, false);
+
+    // methods
+    while (!check(CLOX_TOKEN_EOF) && !check(CLOX_TOKEN_RIGHT_BRACE)) method();
+
+    consume(CLOX_TOKEN_RIGHT_BRACE, "Expect '}' after class body.");
+
+    // pop klass out of stack
+    emit_byte(CLOX_OP_POP);
+
+    if (current_class->has_super) end_scope();
+    current_class = current_class->enclose;
+}
+
+static void method() {
+    // method name
+    consume(CLOX_TOKEN_IDENTIFIER, "Expect method name.");
+    uint16_t identifier = make_constant(OBJ_VALUE(new_string(parser->previous->lexeme, parser->previous->length)));
+
+    // initializer
+    if (parser->previous->length == 4 && memcmp("init", parser->previous->lexeme, parser->previous->length) == 0) function(TYPE_INITIALIZER);
+    // normal body
+    else function(TYPE_METHOD);
+    
+    if (identifier > UINT8_MAX) emit_bytes(3, CLOX_OP_METHOD_16, identifier & 0xff, identifier >> 8);
+    else emit_bytes(2, CLOX_OP_METHOD, identifier);
+}
+
 static void statement() {
-    if (match(1, CLOX_TOKEN_PRINT)) print_statement();
-    else if (match(1, CLOX_TOKEN_LEFT_BRACE)) {
+    if (match(CLOX_TOKEN_PRINT)) print_statement();
+    else if (match(CLOX_TOKEN_LEFT_BRACE)) {
         begin_scope(current_resolver);
         block();
         end_scope();
-    } else if (match(1, CLOX_TOKEN_IF)) if_statement();
-    else if (match(1, CLOX_TOKEN_WHILE)) while_statement(); 
-    else if (match(1, CLOX_TOKEN_FOR)) for_statement();
-    else if (match(1, CLOX_TOKEN_RETURN)) return_statement();
+    } else if (match(CLOX_TOKEN_IF)) if_statement();
+    else if (match(CLOX_TOKEN_WHILE)) while_statement(); 
+    else if (match(CLOX_TOKEN_FOR)) for_statement();
+    else if (match(CLOX_TOKEN_RETURN)) return_statement();
     else expression_statement();
 }
 
@@ -503,7 +603,7 @@ static void if_statement() {
     // pop condition expression on false
     emit_byte(CLOX_OP_POP);
     
-    if (match(1, CLOX_TOKEN_ELSE)) statement();
+    if (match(CLOX_TOKEN_ELSE)) statement();
 
     patch_jump(else_offset);
 }
@@ -529,16 +629,16 @@ static void for_statement() {
     consume(CLOX_TOKEN_LEFT_PAREN, "Expect '(' after 'for'.");
     
     // initializer
-    if (!match(1, CLOX_TOKEN_SEMICOLON)) {
+    if (!match(CLOX_TOKEN_SEMICOLON)) {
         // variable declaration or expression (use statement to pop temporary value and consume ';')
-        if (match(1, CLOX_TOKEN_VAR)) var_declaration();
+        if (match(CLOX_TOKEN_VAR)) var_declaration();
         else expression_statement();
     }
 
     // condition
     int start = current_chunk()->count;
     int end_for = -1;
-    if (!match(1, CLOX_TOKEN_SEMICOLON)) {
+    if (!match(CLOX_TOKEN_SEMICOLON)) {
         expression();
         consume(CLOX_TOKEN_SEMICOLON, "Expect ';' after loop condition.");
         end_for = emit_jump(CLOX_OP_JUMP_IF_FALSE);
@@ -547,7 +647,7 @@ static void for_statement() {
     }
 
     // increment
-    if (!match(1, CLOX_TOKEN_RIGHT_PAREN)) {
+    if (!match(CLOX_TOKEN_RIGHT_PAREN)) {
         int body = emit_jump(CLOX_OP_JUMP);
         int increment = current_chunk()->count;
         expression();
@@ -576,9 +676,12 @@ static void return_statement() {
     else {
         if (match(CLOX_TOKEN_SEMICOLON)) emit_nil_return();
         else {
-            expression();        
-            consume(CLOX_TOKEN_SEMICOLON, "Expect ';' after return statement");
-            emit_return();
+            if (current_resolver->type == TYPE_INITIALIZER) error_report(parser->previous, "Can't return a value from an initializer.");
+            else {
+                expression();        
+                consume(CLOX_TOKEN_SEMICOLON, "Expect ';' after return statement");
+                emit_return();
+            }
         }
     }
 }
@@ -608,23 +711,27 @@ static void parse_precedence(Precedence precedence) {
         parser_func infix = rules[parser->previous->type].infix;
         infix(assign);
     }
-    if (assign && match(1, CLOX_TOKEN_EQUAL)) error_report(parser->previous, "Invalid assignment target.");
+    if (assign && match(CLOX_TOKEN_EQUAL)) error_report(parser->previous, "Invalid assignment target.");
 }
 
 static void variable(bool assign) {
+    named_variable(parser->previous, assign);
+}
+
+static void named_variable(Token *variable, bool assign) {
 #define PARSE_VARIABLE(operation, idx, scope) do {\
         if ((idx) > UINT8_MAX) emit_bytes(3, CLOX_OP_##operation##_##scope##_16, (idx) & 0xff, (idx) >> 8);\
         else emit_bytes(2, CLOX_OP_##operation##_##scope, (idx));\
     } while(0);
     
-    int local_idx = resolve_local(parser->previous, current_resolver);
+    int local_idx = resolve_local(variable, current_resolver);
     int upvalue_idx = -1;
     int global_idx = -1;
     if (local_idx == -1) {
-        upvalue_idx = resolve_upvalue(parser->previous, current_resolver);
-        if (upvalue_idx == -1) global_idx = make_constant(OBJ_VALUE(new_string(parser->previous->lexeme, parser->previous->length)));
+        upvalue_idx = resolve_upvalue(variable, current_resolver);
+        if (upvalue_idx == -1) global_idx = make_constant(OBJ_VALUE(new_string(variable->lexeme, variable->length)));
     }
-    if (assign && match(1, CLOX_TOKEN_EQUAL)) {
+    if (assign && match(CLOX_TOKEN_EQUAL)) {
         expression();
         // set variables
         if (local_idx != -1) {
@@ -650,7 +757,6 @@ static void variable(bool assign) {
             PARSE_VARIABLE(GET, global_idx, GLOBAL);
         }
     }
-
 #undef PARSE_VARIABLE
 }
 
@@ -707,7 +813,30 @@ static void grouping(bool assign) {
 
 static void call(bool assign) {
     uint8_t arg_cnt = argument_list();
-    emit_bytes(2, CLOX_OP_CALL, arg_cnt); 
+    emit_bytes(2, CLOX_OP_CALL, arg_cnt);
+}
+
+static void dot(bool assign) {
+    consume(CLOX_TOKEN_IDENTIFIER, "Expect property name after '.'.");
+    // append previous token into constant pool
+    uint16_t idx = declare_global();
+    if (assign && match(CLOX_TOKEN_EQUAL)) {
+        expression();
+        // set property
+        if (idx > UINT8_MAX) emit_bytes(3, CLOX_OP_SET_PROPERTY_16, idx & 0xff, idx >> 8);
+        else emit_bytes(2, CLOX_OP_SET_PROPERTY, idx);
+    } else {
+        if (match(CLOX_TOKEN_LEFT_PAREN)) {
+            // method call
+            uint8_t arg_cnt = argument_list();
+            if (idx > UINT8_MAX) emit_bytes(4, CLOX_OP_INVOKE_16, idx & 0xff, idx >> 8, arg_cnt);
+            else emit_bytes(3, CLOX_OP_INVOKE, idx, arg_cnt);
+        } else {
+            // get property
+            if (idx > UINT8_MAX) emit_bytes(3, CLOX_OP_GET_PROPERTY_16, idx & 0xff, idx >> 8);
+            else emit_bytes(2, CLOX_OP_GET_PROPERTY, idx);
+        }
+    }
 }
 
 static uint8_t argument_list() {
@@ -718,7 +847,7 @@ static uint8_t argument_list() {
             expression();
             if (arg_cnt == 256) error_report(parser->current, "Can't have more than 255 arguments.");
             arg_cnt++;
-        } while (match(1, CLOX_TOKEN_COMMA));
+        } while (match(CLOX_TOKEN_COMMA));
     }
     consume(CLOX_TOKEN_RIGHT_PAREN, "Expect ')' after arguments.");
     return (uint8_t)arg_cnt;
@@ -850,6 +979,44 @@ static void xor(bool assign) {
     patch_jump(pop_jump);
 }
 
+// just treat this as a variable, let @function: variable handles all parsing
+static void this(bool assign) {
+    if (current_class == NULL) {
+        error_report(parser->previous, "Can't use 'this' outside of a class.");
+        return;
+    }
+    // this cannot be reassigned to any other values
+    variable(false);
+}
+
+static void super(bool assign) {
+    if (current_class == NULL) {
+        error_report(parser->previous, "Can't use 'super' outside of a class.");
+        return;
+    } else if (!current_class->has_super) {
+        error_report(parser->previous, "Can't use 'super' in a class with no superclass.");
+        return;
+    }
+    consume(CLOX_TOKEN_DOT, "Expect '.' after 'super'.");
+    consume(CLOX_TOKEN_IDENTIFIER, "Expect superclass method name.");
+    uint16_t idx = identifier_constant(parser->previous);
+    // load current instance
+    named_variable(&THIS_TOKEN, false);
+    
+    if (match(CLOX_TOKEN_LEFT_PAREN)) {
+        uint8_t arg_cnt = argument_list();
+        // load super klass
+        named_variable(&SUPER_TOKEN, false);
+        if (idx > UINT8_MAX) emit_bytes(4, CLOX_OP_INVOKE_SUPER_16, idx & 0xff, idx >> 8, arg_cnt);
+        else emit_bytes(3, CLOX_OP_INVOKE_SUPER, idx, arg_cnt);
+    } else {
+        // load super klass
+        named_variable(&SUPER_TOKEN, false);
+        if (idx > UINT8_MAX) emit_bytes(3, CLOX_OP_GET_SUPER_16, idx & 0xff, idx >> 8);
+        else emit_bytes(2, CLOX_OP_GET_SUPER, idx);
+    }
+}
+
 static void emit_byte(uint8_t byte) {
     write_chunk(current_chunk(), byte, parser->previous->location.line, parser->previous->location.column);
 }
@@ -862,7 +1029,9 @@ static void emit_bytes(int cnt, ...) {
 }
 
 static void emit_nil_return() {
-    emit_byte(CLOX_OP_NIL);
+    // for initializer, slot 0 is instance
+    if (current_resolver->type == TYPE_INITIALIZER) emit_bytes(2, CLOX_OP_GET_LOCAL, 0);
+    else emit_byte(CLOX_OP_NIL);
     emit_return();
 }
 
@@ -883,6 +1052,11 @@ static uint16_t make_constant(Value value) {
     int idx = append_constant(current_chunk(), value);
     if (idx > UINT16_MAX) error_report(parser->previous, "Too many constants in one chunk.");
     return (uint16_t)idx;
+}
+
+static uint16_t identifier_constant(Token* identifier) {
+    StringObj *identifier_string = new_string(identifier->lexeme, identifier->length);
+    return make_constant(OBJ_VALUE(identifier_string));
 }
 
 static int emit_jump(uint8_t instruction) {

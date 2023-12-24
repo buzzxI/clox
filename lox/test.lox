@@ -61,7 +61,7 @@
 //     }
 // }
 // var begin = clock();
-// print fibonacci(15);
+// print fibonacci(30);
 // var end = clock();
 // print end - begin;
 
@@ -134,15 +134,158 @@
 // set();
 // get();
 
-fun outer() {
-    var i = 0;
-    fun inner() {
-        i = i + 1;
-        print i;
-    }
-    return inner;
+// fun outer() {
+//     var i = 0;
+//     fun inner(a, b) {
+//         i = i + 1;
+//         print i;
+//     }
+//     return inner;
+// }
+
+// var rst = outer();
+// // rst();
+// rst(1, 2);
+
+// fun test() {
+//     class Pair {}
+
+//     var pair = Pair();
+//     pair.first = 1;
+//     pair.second = 2;
+//     print pair.first + pair.second; // 3.
+// }
+
+// test();
+
+
+// {
+//     class test {}
+//     var instance = test();
+//     print instance;
+// }
+
+// var global = "global";
+
+// {
+//     var local = "local";
+//     print local + global;
+// }
+
+// class test {
+//   func_1() {
+//     print "from func_1";
+//   }
+// }
+
+// fun func_1() {
+//   print "outer";
+// }
+
+// var t1 = test();
+// t1.func_1();
+// func_1();
+
+// class Scone {
+//   topping(first, second) {
+//     print "scone with " + first + " and " + second;
+//   }
+// }
+
+// var scone = Scone();
+// scone.topping("berries", "cream");
+
+
+// class Nested {
+//   method() {
+//     fun function() {
+//       print this;
+//     }
+
+//     function();
+//   }
+// }
+
+// Nested().method();
+
+// class CoffeeMaker {
+//   init(coffee) {
+//     this.coffee = coffee;
+//   }
+
+//   brew() {
+//     print "Enjoy your cup of " + this.coffee;
+
+//     // No reusing the grounds!
+//     this.coffee = nil;
+//   }
+// }
+
+// var maker = CoffeeMaker("coffee and chicory");
+// maker.brew();
+
+// class Oops {
+//   init() {
+//     fun f() {
+//       print "not a method";
+//       print this;
+//     }
+//     this.field = f;
+//   }
+// }
+
+// var oops = Oops();
+// oops.field();
+
+// class Doughnut {
+//   cook() {
+//     print "Dunk in the fryer.";
+//     this.finish("sprinkles");
+//   }
+
+//   finish(ingredient) {
+//     print "Finish with " + ingredient;
+//   }
+// }
+
+// class Cruller < Doughnut {
+//   finish(ingredient) {
+//     // No sprinkles, always icing.
+//     super.finish("icing");
+//   }
+// }
+
+// var instance = Cruller();
+// instance.cook();
+
+class Zoo {
+  init() {
+    this.aardvark = 1;
+    this.baboon   = 1;
+    this.cat      = 1;
+    this.donkey   = 1;
+    this.elephant = 1;
+    this.fox      = 1;
+  }
+  ant()    { return this.aardvark; }
+  banana() { return this.baboon; }
+  tuna()   { return this.cat; }
+  hay()    { return this.donkey; }
+  grass()  { return this.elephant; }
+  mouse()  { return this.fox; }
 }
 
-var rst = outer();
-rst();
-rst();
+var zoo = Zoo();
+var sum = 0;
+var start = clock();
+while (sum < 100000000) {
+  sum = sum + zoo.ant()
+            + zoo.banana()
+            + zoo.tuna()
+            + zoo.hay()
+            + zoo.grass()
+            + zoo.mouse();
+}
+
+print clock() - start;
+print sum;

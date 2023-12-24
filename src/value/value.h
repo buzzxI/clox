@@ -22,6 +22,9 @@ typedef struct FunctionObj FunctionObj;
 typedef struct NativeObj NativeObj;
 typedef struct ClosureObj ClosureObj;
 typedef struct UpvalueObj UpvalueObj;
+typedef struct ClassObj ClassObj;
+typedef struct InstanceObj InstanceObj;
+typedef struct MethodObj MethodObj;
 
 typedef enum ValueType {
     VAL_BOOL,

@@ -25,9 +25,11 @@ typedef struct {
     Table globals;
     // a linked list with dummy head
     UpvalueObj upvalues;
+    // class initializer name 
+    StringObj *init_string;
+
     // gray stack for traversal
     Obj* gray_stack[MAX_STACK];
-    // Obj **gray_stack;
     int gray_count;
     // int gray_capacity;
     // fields trigger gc

@@ -3,6 +3,7 @@
 #include "common.h"
 #include "value/value.h"
 #include "chunk/chunk.h"
+#include "table/table.h"
 
 #define OBJ_TYPE(value)     ((value).data.obj->type)
 #define IS_STRING(value)    (isObjType(value, OBJ_STRING))
@@ -11,6 +12,8 @@
 #define IS_NATIVE(value)    (isObjType(value, OBJ_NATIVE))
 #define IS_CLOSURE(value)   (isObjType(value, OBJ_CLOSURE))
 #define IS_UPVALUE(value)   (isObjType(value, OBJ_UPVALUE))
+#define IS_CLASS(value)     (isObjType(value, OBJ_CLASS))
+#define IS_METHOD(value)    (isObjType(value, OBJ_METHOD))
 
 #define AS_STRING(value)    ((StringObj*)(value).data.obj)
 #define AS_CSTRING(value)   (((StringObj*)(value).data.obj)->str)
@@ -18,16 +21,21 @@
 #define AS_NATIVE(value)    ((NativeObj*)(value).data.obj)
 #define AS_CLOSURE(value)   ((ClosureObj*)(value).data.obj)
 #define AS_UPVALUE(value)   ((UpvalueObj*)(value).data.obj)
+#define AS_CLASS(value)     ((ClassObj*)(value).data.obj)
+#define AS_INSTANCE(value)  ((InstanceObj*)(value).data.obj)
+#define AS_METHOD(value)    ((MethodObj*)(value).data.obj)
 
 typedef Value (*native_func)(int argc, Value *args);
 
 typedef enum {
     OBJ_STRING,
-    OBJ_INSTANCE,
     OBJ_FUNCTION,
     OBJ_NATIVE,
     OBJ_CLOSURE,
     OBJ_UPVALUE,
+    OBJ_CLASS,
+    OBJ_INSTANCE,
+    OBJ_METHOD,
 } ObjType;
 
 struct Obj {
@@ -71,6 +79,25 @@ struct UpvalueObj {
     UpvalueObj *next;
 };
 
+struct ClassObj {
+    Obj obj;
+    StringObj *name;
+    Table methods;
+};
+
+struct InstanceObj {
+    Obj obj;
+    ClassObj *klass;
+    Table fields;
+};
+
+struct MethodObj {
+    Obj obj;
+    // type of receiver must be InstanceObj
+    Value receiver;
+    ClosureObj *closure;
+};
+
 static inline bool isObjType(Value value, ObjType type) {
     return IS_OBJ(value) && OBJ_TYPE(value) == type;
 };
@@ -85,6 +112,9 @@ FunctionObj *new_function();
 NativeObj *new_native(native_func func, StringObj *name);
 ClosureObj *new_closure(FunctionObj *function);
 UpvalueObj *new_upvalue(Value *slot);
+ClassObj *new_class(StringObj *name);
+InstanceObj *new_instance(ClassObj *klass);
+MethodObj *new_method(Value receiver, ClosureObj *closure);
 
 void free_obj(Obj *obj);
 void free_objs();

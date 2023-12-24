@@ -15,28 +15,44 @@ static uint32_t hash_string(const char *str, int length);
 
 void print_obj(Value value) {
     switch (OBJ_TYPE(value)) {
-        case OBJ_STRING:
+        case OBJ_STRING: {
             printf("%s", AS_CSTRING(value));
             break;
-        case OBJ_INSTANCE:
-            printf("<instance>");
-            break;
-        case OBJ_FUNCTION:
+        }
+        case OBJ_FUNCTION: {
             FunctionObj *function = AS_FUNCTION(value);
             if (function->name == NULL) printf("<clox script>");
             else printf("<clox function %s>", function->name->str);
             break;
-        case OBJ_NATIVE:
+        }
+        case OBJ_NATIVE: {
             printf("<clox native %s>", AS_NATIVE(value)->name->str);
             break;
-        case OBJ_CLOSURE:
+        }
+        case OBJ_CLOSURE: {
             ClosureObj *closure = AS_CLOSURE(value);
             if (closure->function->name == NULL) printf("<clox closure script>");
             else printf("<clox closure %s>", closure->function->name->str);
             break;
-        case OBJ_UPVALUE:
+        }
+        case OBJ_UPVALUE: {
             printf("<upvalue>");
             break;
+        }
+        case OBJ_CLASS: {
+            printf("<clox class %s>", AS_CLASS(value)->name->str);
+            break;
+        }
+        case OBJ_INSTANCE: {
+            InstanceObj *instance = AS_INSTANCE(value);
+            printf("<clox instance %s>", instance->klass->name->str);
+            break;
+        }
+        case OBJ_METHOD: {
+            MethodObj *method = AS_METHOD(value);
+            printf("<clox method %s>", method->closure->function->name->str);
+            break;
+        }
     }
 } 
 
@@ -44,11 +60,13 @@ bool objs_equal(Value a, Value b) {
     if (OBJ_TYPE(a) != OBJ_TYPE(b)) return false;
     switch (OBJ_TYPE(a)) {
         case OBJ_STRING:    return AS_STRING(a) == AS_STRING(b);
-        case OBJ_INSTANCE:  return false;
         case OBJ_FUNCTION:  return AS_FUNCTION(a) == AS_FUNCTION(b);
         case OBJ_NATIVE:    return AS_NATIVE(a) == AS_NATIVE(b);
         case OBJ_CLOSURE:   return AS_CLOSURE(a) == AS_CLOSURE(b);
         case OBJ_UPVALUE:   return AS_CLOSURE(a) == AS_CLOSURE(b);
+        case OBJ_CLASS:     return AS_CLASS(a) == AS_CLASS(b);
+        case OBJ_INSTANCE:  return AS_INSTANCE(a) == AS_INSTANCE(b);
+        case OBJ_METHOD:    return AS_METHOD(a) == AS_METHOD(b);
     }
     return false;
 }
@@ -112,6 +130,27 @@ UpvalueObj* new_upvalue(Value *slot) {
     return upvalue;
 }
 
+ClassObj* new_class(StringObj *name) {
+    ClassObj *class = (ClassObj*)new_obj(OBJ_CLASS, sizeof(ClassObj));
+    class->name = name;
+    init_table(&class->methods);
+    return class;
+}
+
+InstanceObj* new_instance(ClassObj *klass) {
+    InstanceObj *instance = (InstanceObj*)new_obj(OBJ_INSTANCE, sizeof(InstanceObj));
+    instance->klass = klass;
+    init_table(&instance->fields);
+    return instance;
+}
+
+MethodObj* new_method(Value receiver, ClosureObj *method) {
+    MethodObj *obj = (MethodObj*)new_obj(OBJ_METHOD, sizeof(MethodObj));
+    obj->receiver = receiver;
+    obj->closure = method;
+    return obj;
+}
+
 void free_objs() {
     Obj *cur = &vm.objs;
     while (cur->next != NULL) {
@@ -119,8 +158,6 @@ void free_objs() {
         cur->next = next->next;
         free_obj(next);
     }
-    // free gray stack
-    // free(vm.gray_stack);
 }
 
 static Obj* new_obj(ObjType type, size_t size) {
@@ -145,9 +182,6 @@ void free_obj(Obj *obj) {
             FREE_ARRAY(char, string->str, string->length + 1);
             FREE(StringObj, obj);
             break;
-        case OBJ_INSTANCE:
-            // FREE(, obj);
-            break;
         case OBJ_FUNCTION:
             FunctionObj *function = (FunctionObj*)obj;
             free_chunk(&function->chunk);
@@ -164,8 +198,20 @@ void free_obj(Obj *obj) {
         case OBJ_UPVALUE:
             FREE(UpvalueObj, obj);
             break;
-        default:
+        case OBJ_CLASS:
+            ClassObj *class = (ClassObj*)obj;
+            free_table(&class->methods);
+            FREE(ClassObj, obj);
             break;
+        case OBJ_INSTANCE:
+            InstanceObj *instance = (InstanceObj*)obj;
+            free_table(&instance->fields);
+            FREE(InstanceObj, obj);
+            break;
+        case OBJ_METHOD: {
+            FREE(MethodObj, obj);
+            break;
+        }
     }
 }
 

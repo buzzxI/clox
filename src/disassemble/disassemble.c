@@ -2,6 +2,9 @@
 #include "object/object.h"
 #include <stdio.h>
 
+static void print_prelude(Chunk *chunk, int offset);
+static int invoke(const char *name, Chunk *chunk, int offset);
+static int invoke_16(const char *name, Chunk *chunk, int offset);
 static int non_operand(const char *name, int offset);
 static int single_operand(const char *name, Chunk *chunk, int offset);
 static int double_operand(const char *name, Chunk *chunk, int offset);
@@ -24,55 +27,90 @@ void disassemble_chunk(Chunk* chunk, const char* name) {
 }
 
 int disassemble_instruction(Chunk *chunk, int offset) {
+    print_prelude(chunk, offset);
+    uint8_t instruction = chunk->code[offset];
+    switch (instruction) {
+        case CLOX_OP_RETURN:           return non_operand("CLOX_OP_RETURN", offset);
+        case CLOX_OP_CONSTANT:         return constant("CLOX_OP_CONSTANT", chunk, offset);
+        case CLOX_OP_CONSTANT_16:      return constant_16("CLOX_OP_CONSTANT_16", chunk, offset);
+        case CLOX_OP_TRUE:             return non_operand("CLOX_OP_TRUE", offset);
+        case CLOX_OP_FALSE:            return non_operand("CLOX_OP_FALSE", offset);
+        case CLOX_OP_NIL:              return non_operand("CLOX_OP_NIL", offset);
+        case CLOX_OP_NEGATE:           return non_operand("CLOX_OP_NEGATE", offset);
+        case CLOX_OP_ADD:              return non_operand("CLOX_OP_ADD", offset);
+        case CLOX_OP_SUBTRACT:         return non_operand("CLOX_OP_SUBTRACT", offset);
+        case CLOX_OP_MULTIPLY:         return non_operand("CLOX_OP_MULTIPLY", offset);
+        case CLOX_OP_DIVIDE:           return non_operand("CLOX_OP_DIVIDE", offset);
+        case CLOX_OP_MODULO:           return non_operand("CLOX_OP_MODULO", offset);
+        case CLOX_OP_NOT:              return non_operand("CLOX_OP_NOT", offset);
+        case CLOX_OP_GREATER:          return non_operand("CLOX_OP_GREATER", offset);
+        case CLOX_OP_LESS:             return non_operand("CLOX_OP_LESS", offset);
+        case CLOX_OP_EQUAL:            return non_operand("CLOX_OP_EQUAL", offset);
+        case CLOX_OP_PRINT:            return non_operand("CLOX_OP_PRINT", offset);
+        case CLOX_OP_POP:              return non_operand("CLOX_OP_POP", offset);
+        case CLOX_OP_DEFINE_GLOBAL:    return constant("CLOX_OP_DEFINE_GLOBAL", chunk, offset);
+        case CLOX_OP_DEFINE_GLOBAL_16: return constant_16("CLOX_OP_DEFINE_GLOBAL_16", chunk, offset);
+        case CLOX_OP_GET_GLOBAL:       return constant("CLOX_OP_GET_GLOBAL", chunk, offset);
+        case CLOX_OP_GET_GLOBAL_16:    return constant_16("CLOX_OP_GET_GLOBAL_16", chunk, offset);
+        case CLOX_OP_SET_GLOBAL:       return constant("CLOX_OP_SET_GLOBAL", chunk, offset);
+        case CLOX_OP_SET_GLOBAL_16:    return constant_16("CLOX_OP_SET_GLOBAL_16", chunk, offset);
+        case CLOX_OP_GET_LOCAL:        return single_operand("CLOX_OP_GET_LOCAL", chunk, offset);
+        case CLOX_OP_GET_LOCAL_16:     return double_operand("CLOX_OP_GET_LOCAL_16", chunk, offset);
+        case CLOX_OP_SET_LOCAL:        return single_operand("CLOX_OP_SET_LOCAL", chunk, offset);
+        case CLOX_OP_SET_LOCAL_16:     return double_operand("CLOX_OP_SET_LOCAL_16", chunk, offset);
+        case CLOX_OP_JUMP_IF_FALSE:    return double_operand("CLOX_OP_JUMP_IF_FALSE", chunk, offset);
+        case CLOX_OP_JUMP:             return double_operand("CLOX_OP_JUMP", chunk, offset);
+        case CLOX_OP_LOOP:             return double_operand("CLOX_OP_LOOP", chunk, offset);
+        case CLOX_OP_CALL:             return single_operand("CLOX_OP_CALL", chunk, offset);
+        case CLOX_OP_CLOSURE:          return function("CLOX_OP_CLOSURE", chunk, offset);
+        case CLOX_OP_CLOSURE_16:       return function_16("CLOX_OP_CLOSURE_16", chunk, offset);
+        case CLOX_OP_GET_UPVALUE:      return single_operand("CLOX_OP_GET_UPVALUE", chunk, offset);
+        case CLOX_OP_GET_UPVALUE_16:   return double_operand("CLOX_OP_GET_UPVALUE_16", chunk, offset);
+        case CLOX_OP_SET_UPVALUE:      return single_operand("CLOX_OP_SET_UPVALUE", chunk, offset);
+        case CLOX_OP_SET_UPVALUE_16:   return double_operand("CLOX_OP_SET_UPVALUE_16", chunk, offset);
+        case CLOX_OP_CLOSE_UPVALUE:    return non_operand("CLOX_OP_CLOSE_UPVALUE", offset);
+        case CLOX_OP_CLASS:            return constant("CLOX_OP_CLASS", chunk, offset);
+        case CLOX_OP_CLASS_16:         return constant_16("CLOX_OP_CLASS_16", chunk, offset);
+        case CLOX_OP_GET_PROPERTY:     return constant("CLOX_OP_GET_PROPERTY", chunk, offset);
+        case CLOX_OP_GET_PROPERTY_16:  return constant_16("CLOX_OP_GET_PROPERTY_16", chunk, offset);
+        case CLOX_OP_SET_PROPERTY:     return constant("CLOX_OP_SET_PROPERTY", chunk, offset);
+        case CLOX_OP_SET_PROPERTY_16:  return constant_16("CLOX_OP_SET_PROPERTY_16", chunk, offset);
+        case CLOX_OP_METHOD:           return constant("CLOX_OP_METHOD", chunk, offset);
+        case CLOX_OP_METHOD_16:        return constant_16("CLOX_OP_METHOD_16", chunk, offset);
+        case CLOX_OP_INVOKE:           return invoke("CLOX_OP_INVOKE", chunk, offset);
+        case CLOX_OP_INVOKE_16:        return invoke_16("CLOX_OP_INVOKE_16", chunk, offset);
+        case CLOX_OP_INHERIT:          return non_operand("CLOX_OP_INHERIT", offset);
+        case CLOX_OP_GET_SUPER:        return constant("CLOX_OP_GET_SUPER", chunk, offset);
+        case CLOX_OP_GET_SUPER_16:     return constant("CLOX_OP_GET_SUPER_16", chunk, offset);
+        case CLOX_OP_INVOKE_SUPER:     return invoke("CLOX_OP_INVOKE_SUPER", chunk, offset);
+        case CLOX_OP_INVOKE_SUPER_16:  return invoke_16("CLOX_OP_INVOKE_SUPER_16", chunk, offset);
+        default: break;
+    }
+    return chunk->count;
+}
+
+static void print_prelude(Chunk *chunk, int offset) {
     // 0 is used for padding (at least 4 characters width), default is right-justified
     printf("%04d ", offset);
     // line info with 4 characters width
     if (offset > 0 && chunk->line_info[offset] == chunk->line_info[offset - 1]) printf("   | ");
     else printf("%4d ",chunk->line_info[offset]);
-    uint8_t instruction = chunk->code[offset];
-    switch (instruction) {
-        case CLOX_OP_RETURN:            return non_operand("CLOX_OP_RETURN", offset);
-        case CLOX_OP_CONSTANT:          return constant("CLOX_OP_CONSTANT", chunk, offset);
-        case CLOX_OP_CONSTANT_16:       return constant_16("CLOX_OP_CONSTANT_16", chunk, offset);
-        case CLOX_OP_TRUE:              return non_operand("CLOX_OP_TRUE", offset);
-        case CLOX_OP_FALSE:             return non_operand("CLOX_OP_FALSE", offset);
-        case CLOX_OP_NIL:               return non_operand("CLOX_OP_NIL", offset);
-        case CLOX_OP_NEGATE:            return non_operand("CLOX_OP_NEGATE", offset);
-        case CLOX_OP_ADD:               return non_operand("CLOX_OP_ADD", offset);
-        case CLOX_OP_SUBTRACT:          return non_operand("CLOX_OP_SUBTRACT", offset);
-        case CLOX_OP_MULTIPLY:          return non_operand("CLOX_OP_MULTIPLY", offset);
-        case CLOX_OP_DIVIDE:            return non_operand("CLOX_OP_DIVIDE", offset);
-        case CLOX_OP_MODULO:            return non_operand("CLOX_OP_MODULO", offset);
-        case CLOX_OP_NOT:               return non_operand("CLOX_OP_NOT", offset);
-        case CLOX_OP_GREATER:           return non_operand("CLOX_OP_GREATER", offset);
-        case CLOX_OP_LESS:              return non_operand("CLOX_OP_LESS", offset);
-        case CLOX_OP_EQUAL:             return non_operand("CLOX_OP_EQUAL", offset);
-        case CLOX_OP_PRINT:             return non_operand("CLOX_OP_PRINT", offset);
-        case CLOX_OP_POP:               return non_operand("CLOX_OP_POP", offset);
-        case CLOX_OP_DEFINE_GLOBAL:     return constant("CLOX_OP_DEFINE_GLOBAL", chunk, offset);
-        case CLOX_OP_DEFINE_GLOBAL_16:  return constant_16("CLOX_OP_DEFINE_GLOBAL_16", chunk, offset);
-        case CLOX_OP_GET_GLOBAL:        return constant("CLOX_OP_GET_GLOBAL", chunk, offset);
-        case CLOX_OP_GET_GLOBAL_16:     return constant_16("CLOX_OP_GET_GLOBAL_16", chunk, offset);
-        case CLOX_OP_SET_GLOBAL:        return constant("CLOX_OP_SET_GLOBAL", chunk, offset);
-        case CLOX_OP_SET_GLOBAL_16:     return constant_16("CLOX_OP_SET_GLOBAL_16", chunk, offset);
-        case CLOX_OP_GET_LOCAL:         return single_operand("CLOX_OP_GET_LOCAL", chunk, offset);
-        case CLOX_OP_GET_LOCAL_16:      return double_operand("CLOX_OP_GET_LOCAL_16", chunk, offset);
-        case CLOX_OP_SET_LOCAL:         return single_operand("CLOX_OP_SET_LOCAL", chunk, offset);
-        case CLOX_OP_SET_LOCAL_16:      return double_operand("CLOX_OP_SET_LOCAL_16", chunk, offset);
-        case CLOX_OP_JUMP_IF_FALSE:     return double_operand("CLOX_OP_JUMP_IF_FALSE", chunk, offset);
-        case CLOX_OP_JUMP:              return double_operand("CLOX_OP_JUMP", chunk, offset);
-        case CLOX_OP_LOOP:              return double_operand("CLOX_OP_LOOP", chunk, offset);
-        case CLOX_OP_CALL:              return single_operand("CLOX_OP_CALL", chunk, offset);
-        case CLOX_OP_CLOSURE:           return function("CLOX_OP_CLOSURE", chunk, offset);
-        case CLOX_OP_CLOSURE_16:        return function_16("CLOX_OP_CLOSURE_16", chunk, offset);
-        case CLOX_OP_GET_UPVALUE:       return single_operand("CLOX_OP_GET_UPVALUE", chunk, offset);
-        case CLOX_OP_GET_UPVALUE_16:    return double_operand("CLOX_OP_GET_UPVALUE_16", chunk, offset);
-        case CLOX_OP_SET_UPVALUE:       return single_operand("CLOX_OP_SET_UPVALUE", chunk, offset);
-        case CLOX_OP_SET_UPVALUE_16:    return double_operand("CLOX_OP_SET_UPVALUE_16", chunk, offset);
-        case CLOX_OP_CLOSE_UPVALUE:     return non_operand("CLOX_OP_CLOSE_UPVALUE", offset);
-        default: break;
-    }
-    return chunk->count;
+}
+
+static int invoke(const char *name, Chunk *chunk, int offset) {
+    offset = constant(name, chunk, offset);
+    print_prelude(chunk, offset);
+    uint8_t idx = single_byte(chunk, offset);
+    print_idx(" ~ arg count", idx);
+    return offset + 1; 
+}
+
+static int invoke_16(const char *name, Chunk *chunk, int offset) {
+    offset = constant_16(name, chunk, offset);
+    print_prelude(chunk, offset);
+    uint8_t idx = single_byte(chunk, offset);
+    print_idx(" ~ arg count", idx);
+    return offset + 1;
 }
 
 static int non_operand(const char *name, int offset) {
