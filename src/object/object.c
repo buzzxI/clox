@@ -177,37 +177,44 @@ void free_obj(Obj *obj) {
     printf("%p free type %d\n", (void*)obj, obj->type);
 #endif // CLOX_DEBUG_LOX_GC
     switch (obj->type) {
-        case OBJ_STRING:
+        case OBJ_STRING: {
             StringObj *string = (StringObj*)obj;
             FREE_ARRAY(char, string->str, string->length + 1);
             FREE(StringObj, obj);
             break;
-        case OBJ_FUNCTION:
+        }
+        case OBJ_FUNCTION: {
             FunctionObj *function = (FunctionObj*)obj;
             free_chunk(&function->chunk);
             FREE(FunctionObj, obj);
             break;
-        case OBJ_NATIVE:
+        }
+        case OBJ_NATIVE: {
             FREE(NativeObj, obj);
             break;
-        case OBJ_CLOSURE:
+        }
+        case OBJ_CLOSURE: {
             ClosureObj *closure = (ClosureObj*)obj;
             FREE_ARRAY(UpvalueObj*, closure->upvalues, closure->upvalue_cnt);
             FREE(ClosureObj, obj);
             break;
-        case OBJ_UPVALUE:
+        }
+        case OBJ_UPVALUE: {
             FREE(UpvalueObj, obj);
             break;
-        case OBJ_CLASS:
+        }
+        case OBJ_CLASS: {
             ClassObj *class = (ClassObj*)obj;
             free_table(&class->methods);
             FREE(ClassObj, obj);
             break;
-        case OBJ_INSTANCE:
+        }
+        case OBJ_INSTANCE: {
             InstanceObj *instance = (InstanceObj*)obj;
             free_table(&instance->fields);
             FREE(InstanceObj, obj);
             break;
+        }
         case OBJ_METHOD: {
             FREE(MethodObj, obj);
             break;
