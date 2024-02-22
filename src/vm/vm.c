@@ -64,9 +64,9 @@ InterpreterResult interpret(const char *source) {
     push_gc(OBJ_VALUE(function));
     ClosureObj *closure = new_closure(function);
     push(OBJ_VALUE(closure));
+    pop_gc();
     invoke(closure, 0);
     InterpreterResult rst = run();
-    pop_gc();
     free_vm();
     return rst; 
 }

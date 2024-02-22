@@ -819,7 +819,7 @@ static void call(bool assign) {
 static void dot(bool assign) {
     consume(CLOX_TOKEN_IDENTIFIER, "Expect property name after '.'.");
     // append previous token into constant pool
-    uint16_t idx = declare_global();
+    uint16_t idx = identifier_constant(parser->previous); 
     if (assign && match(CLOX_TOKEN_EQUAL)) {
         expression();
         // set property

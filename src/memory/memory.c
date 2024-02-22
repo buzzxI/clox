@@ -82,16 +82,8 @@ static void mark_roots() {
     mark_table(&vm.globals);
     // pointers to closure are roots
     for (int i = 0; i < vm.frame_cnt; i++) mark_obj((Obj*)vm.frames[i].closure);
-    // pointers to upvalues are roots
-    // UpvalueObj *upvalue = &vm.upvalues;
-    // while (upvalue->next != NULL) {
-    //     mark_obj((Obj*)(upvalue->next));
-    //     upvalue = upvalue->next;
-    // }
-
     // mark initializer string
     mark_obj((Obj*)vm.init_string);
-
     // mark roots for compile time
     mark_compiler_roots();
     // objects in gc stack are roots

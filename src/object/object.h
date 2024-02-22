@@ -7,12 +7,12 @@
 
 #define OBJ_TYPE(value)     (AS_OBJ(value)->type)
 #define IS_STRING(value)    (isObjType(value, OBJ_STRING))
-#define IS_INSTANCE(value)  (isObjType(value, OBJ_INSTANCE))
 #define IS_FUNCTION(value)  (isObjType(value, OBJ_FUNCTION))
 #define IS_NATIVE(value)    (isObjType(value, OBJ_NATIVE))
 #define IS_CLOSURE(value)   (isObjType(value, OBJ_CLOSURE))
 #define IS_UPVALUE(value)   (isObjType(value, OBJ_UPVALUE))
 #define IS_CLASS(value)     (isObjType(value, OBJ_CLASS))
+#define IS_INSTANCE(value)  (isObjType(value, OBJ_INSTANCE))
 #define IS_METHOD(value)    (isObjType(value, OBJ_METHOD))
 
 #define AS_STRING(value)    ((StringObj*)AS_OBJ(value))
@@ -93,7 +93,7 @@ struct InstanceObj {
 
 struct MethodObj {
     Obj obj;
-    // type of receiver must be InstanceObj
+    // type of receiver must be ClassObj
     Value receiver;
     ClosureObj *closure;
 };
