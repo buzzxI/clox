@@ -158,7 +158,7 @@ static void black_object(Obj *obj) {
         }
         case OBJ_METHOD: {
             MethodObj *method = (MethodObj*)obj;
-            mark_value(&method->receiver);
+            mark_obj((Obj*)method->receiver);
             mark_obj((Obj*)method->closure);
             break;
         }

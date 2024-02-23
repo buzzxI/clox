@@ -144,7 +144,7 @@ InstanceObj* new_instance(ClassObj *klass) {
     return instance;
 }
 
-MethodObj* new_method(Value receiver, ClosureObj *method) {
+MethodObj* new_method(InstanceObj *receiver, ClosureObj *method) {
     MethodObj *obj = (MethodObj*)new_obj(OBJ_METHOD, sizeof(MethodObj));
     obj->receiver = receiver;
     obj->closure = method;
