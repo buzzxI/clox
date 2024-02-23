@@ -93,7 +93,7 @@ struct InstanceObj {
 
 struct MethodObj {
     Obj obj;
-    // type of receiver must be ClassObj
+    // type of receiver must be InstanceObj
     Value receiver;
     ClosureObj *closure;
 };
