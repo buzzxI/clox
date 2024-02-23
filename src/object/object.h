@@ -94,7 +94,7 @@ struct InstanceObj {
 struct MethodObj {
     Obj obj;
     // type of receiver must be InstanceObj
-    Value receiver;
+    InstanceObj *receiver;
     ClosureObj *closure;
 };
 
@@ -114,7 +114,7 @@ ClosureObj *new_closure(FunctionObj *function);
 UpvalueObj *new_upvalue(Value *slot);
 ClassObj *new_class(StringObj *name);
 InstanceObj *new_instance(ClassObj *klass);
-MethodObj *new_method(Value receiver, ClosureObj *closure);
+MethodObj *new_method(InstanceObj *receiver, ClosureObj *closure);
 
 void free_obj(Obj *obj);
 void free_objs();

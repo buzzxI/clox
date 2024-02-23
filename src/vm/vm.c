@@ -618,7 +618,7 @@ Value pop_gc() {
 static bool bind_method(ClassObj *klass, StringObj *method) {
     Value method_value;
     if (!table_get(method, &method_value, &klass->methods)) return false;
-    MethodObj *method_obj = new_method(peek(0), AS_CLOSURE(method_value));
+    MethodObj *method_obj = new_method(AS_INSTANCE(peek(0)), AS_CLOSURE(method_value));
     // discard instance
     pop();
     push(OBJ_VALUE(method_obj)); 
@@ -658,7 +658,8 @@ static bool function_call(Value function, uint8_t arg_cnt) {
         case OBJ_METHOD: {
             MethodObj *method = AS_METHOD(function);
             // overwrite function slot into receiver slot
-            vm.sp[-arg_cnt - 1] = method->receiver;
+
+            vm.sp[-arg_cnt - 1] = (Value)method->receiver;
             return invoke(method->closure, arg_cnt);
         }
         default: break;
