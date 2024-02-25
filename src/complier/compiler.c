@@ -985,6 +985,7 @@ static void this(bool assign) {
         error_report(parser->previous, "Can't use 'this' outside of a class.");
         return;
     }
+    // load current instance into stack
     // this cannot be reassigned to any other values
     variable(false);
 }
@@ -999,6 +1000,7 @@ static void super(bool assign) {
     }
     consume(CLOX_TOKEN_DOT, "Expect '.' after 'super'.");
     consume(CLOX_TOKEN_IDENTIFIER, "Expect superclass method name.");
+    // append property into constanct pool
     uint16_t idx = identifier_constant(parser->previous);
     // load current instance
     named_variable(&THIS_TOKEN, false);

@@ -16,7 +16,6 @@
 
 static void reset_stack();
 static InterpreterResult run();
-static bool bind_method(ClassObj *klass, StringObj *method);
 static bool function_call(Value function, uint8_t arg_cnt);
 static bool invoke(ClosureObj *closure, uint8_t arg_cnt);
 static void close_upvalue(Value *slot);
@@ -396,7 +395,8 @@ static InterpreterResult run() {
                 }
                 InstanceObj *instance_obj = AS_INSTANCE(instance);
                 Value value;
-                
+
+                // identifier as field                
                 if (table_get(identifier, &value, &instance_obj->fields)) {
                     // discard instance
                     pop();
@@ -404,7 +404,13 @@ static InterpreterResult run() {
                     break;
                 }
 
-                if (bind_method(instance_obj->klass, identifier)) break;
+                // identifier as method
+                if (table_get(identifier, &value, &instance_obj->klass->methods)) {
+                    MethodObj *method = new_method(instance_obj, AS_CLOSURE(value));
+                    pop();
+                    push(OBJ_VALUE(method));
+                    break;
+                }
 
                 runtime_error("undefined property '%s'.", identifier->str);
                 return INTERPRET_RUNTIME_ERROR;
@@ -419,6 +425,7 @@ static InterpreterResult run() {
                 InstanceObj *instance_obj = AS_INSTANCE(instance);
                 Value value;
 
+                // identifier as field                
                 if (table_get(identifier, &value, &instance_obj->fields)) {
                     // discard instance
                     pop();
@@ -426,7 +433,13 @@ static InterpreterResult run() {
                     break;
                 }
 
-                if (bind_method(instance_obj->klass, identifier)) break;
+                // identifier as method
+                if (table_get(identifier, &value, &instance_obj->klass->methods)) {
+                    MethodObj *method = new_method(instance_obj, AS_CLOSURE(value));
+                    pop();
+                    push(OBJ_VALUE(method));
+                    break;
+                }
 
                 runtime_error("undefined property '%s'.", identifier->str);
                 return INTERPRET_RUNTIME_ERROR;
@@ -504,14 +517,11 @@ static InterpreterResult run() {
                 
                 Value method;
                 InstanceObj *instance_obj = AS_INSTANCE(instance);
+                // lox may have function reference as field
                 if (table_get(identifier, &method, &instance_obj->fields)) {
+                    // overwrite instance into method
                     vm.sp[-1 - *arg_cnt] = method;
                     if (!function_call(method, *arg_cnt)) return INTERPRET_RUNTIME_ERROR;
-                    // if (!IS_CLOSURE(method)) {
-                    //     runtime_error("only methods can be invoked.");
-                    //     return INTERPRET_RUNTIME_ERROR;
-                    // }
-                    // if (!invoke(AS_CLOSURE(method), *arg_cnt)) return INTERPRET_RUNTIME_ERROR;
                 } else {
                     ClassObj *klass = instance_obj->klass;
                     if (!table_get(identifier, &method, &klass->methods)) {
@@ -538,36 +548,59 @@ static InterpreterResult run() {
             }
             case CLOX_OP_GET_SUPER: {
                 StringObj *identifier = AS_STRING(READ_CONSTANT());
-                Value superclass = pop();
+                Value superclass = peek(0);
                 if (!IS_CLASS(superclass)) {
                     runtime_error("superclass must be a class.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                ClassObj *superklass = AS_CLASS(superclass);
-                Value method;
-                if (!table_get(identifier, &method, &superklass->methods)) {
-                    runtime_error("undefined property '%s'.", identifier->str);
+                Value instance = peek(1);
+                if (!IS_INSTANCE(instance)) {
+                    runtime_error("only instances have properties.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                if (!bind_method(superklass, identifier)) return INTERPRET_RUNTIME_ERROR;
-                break;
+                ClassObj *superklass = AS_CLASS(superclass);
+                InstanceObj *instance_obj = AS_INSTANCE(instance);
+                Value method;
+
+                if (table_get(identifier, &method, &superklass->methods)) {
+                    MethodObj *method_obj = new_method(instance_obj, AS_CLOSURE(method));
+                    pop(); // pop superklass
+                    pop(); // pop instance
+                    push(OBJ_VALUE(method_obj));
+                    break;
+                }
+
+                runtime_error("undefined method '%s' in superclass.", identifier->str);
+                return INTERPRET_RUNTIME_ERROR;
             }
             case CLOX_OP_GET_SUPER_16: {
                 StringObj *identifier = AS_STRING(READ_CONSTANT_16());
-                Value superclass = pop();
+
+                Value superclass = peek(0);
                 if (!IS_CLASS(superclass)) {
                     runtime_error("superclass must be a class.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                ClassObj *superklass = AS_CLASS(superclass);
-                Value method;
-                if (!table_get(identifier, &method, &superklass->methods)) {
-                    runtime_error("undefined property '%s'.", identifier->str);
+                Value instance = peek(1);
+                if (!IS_INSTANCE(instance)) {
+                    runtime_error("only instances have properties.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                if (!bind_method(superklass, identifier)) return INTERPRET_RUNTIME_ERROR;
+                ClassObj *superklass = AS_CLASS(superclass);
+                InstanceObj *instance_obj = AS_INSTANCE(instance);
+                Value method;
+
+                if (table_get(identifier, &method, &superklass->methods)) {
+                    MethodObj *method_obj = new_method(instance_obj, AS_CLOSURE(method));
+                    pop(); // pop superklass
+                    pop(); // pop instance
+                    push(OBJ_VALUE(method_obj));
+                    break;
+                }
+
+                runtime_error("undefined method '%s' in superclass.", identifier->str);
+                return INTERPRET_RUNTIME_ERROR;
             }
-            default: break;
             case CLOX_OP_INVOKE_SUPER: {
                 StringObj *identifier = AS_STRING(READ_CONSTANT());
                 uint8_t *arg_cnt = read_bytes(1);
@@ -577,7 +610,7 @@ static InterpreterResult run() {
                     runtime_error("undefined property '%s' in superclass.", identifier->str);
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                invoke(AS_CLOSURE(method), *arg_cnt);
+                if (!invoke(AS_CLOSURE(method), *arg_cnt)) return INTERPRET_RUNTIME_ERROR;
                 frame = &vm.frames[vm.frame_cnt - 1];
                 break;
             }
@@ -590,9 +623,13 @@ static InterpreterResult run() {
                     runtime_error("undefined property '%s' in superclass.", identifier->str);
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                invoke(AS_CLOSURE(method), *arg_cnt);
+                if (!invoke(AS_CLOSURE(method), *arg_cnt)) return INTERPRET_RUNTIME_ERROR;
                 frame = &vm.frames[vm.frame_cnt - 1];
                 break;
+            }
+            default: {
+                runtime_error("unknown opcode %d.", *instruction);
+                return INTERPRET_RUNTIME_ERROR;
             }
         }
     }
@@ -613,16 +650,6 @@ void push_gc(Value value) {
 
 Value pop_gc() {
     return vm.gc_stack[--vm.gc_stack_cnt];
-}
-
-static bool bind_method(ClassObj *klass, StringObj *method) {
-    Value method_value;
-    if (!table_get(method, &method_value, &klass->methods)) return false;
-    MethodObj *method_obj = new_method(AS_INSTANCE(peek(0)), AS_CLOSURE(method_value));
-    // discard instance
-    pop();
-    push(OBJ_VALUE(method_obj)); 
-    return true;
 }
 
 static bool function_call(Value function, uint8_t arg_cnt) {
@@ -658,8 +685,7 @@ static bool function_call(Value function, uint8_t arg_cnt) {
         case OBJ_METHOD: {
             MethodObj *method = AS_METHOD(function);
             // overwrite function slot into receiver slot
-
-            vm.sp[-arg_cnt - 1] = (Value)method->receiver;
+            vm.sp[-arg_cnt - 1] = OBJ_VALUE(method->receiver);
             return invoke(method->closure, arg_cnt);
         }
         default: break;

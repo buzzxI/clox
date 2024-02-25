@@ -172,22 +172,22 @@
 //     print local + global;
 // }
 
-class test {
-  func_1() {
-    print "from func_1";
-  }
-  func_2() {
-    print "from func_2";
-  }
-}
+// class test {
+//   func_1() {
+//     print "from func_1";
+//   }
+//   func_2() {
+//     print "from func_2";
+//   }
+// }
 
 // fun func_1() {
 //   print "outer";
 // }
 
-var t1 = test();
-t1.func_1();
-t1.func_2();
+// var t1 = test();
+// t1.func_1();
+// t1.func_2();
 // func_1();
 
 // class Scone {
@@ -293,3 +293,21 @@ t1.func_2();
 
 // print clock() - start;
 // print sum;
+
+
+// class Test {
+//   add(val) {
+//     this.val = val;
+//   }
+//   output() {
+//     print this.val;
+//   }
+// }
+
+// var t = Test();
+// t.add("buzz");
+// t.output();
+
+
+var nan = 0 / 0;
+print nan == nan;
